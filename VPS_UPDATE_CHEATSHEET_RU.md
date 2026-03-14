@@ -28,14 +28,14 @@ rm -rf /var/www/fanglaw-web/current/*
 cp -r /root/fanglaw/client/web_export/* /var/www/fanglaw-web/current/
 chown -R www-data:www-data /var/www/fanglaw-web
 chmod -R 755 /var/www/fanglaw-web
-
-cp /root/fanglaw/server/deploy/nginx/fanglaw1.ru.single-domain.http.conf /etc/nginx/sites-available/fanglaw
-ln -sf /etc/nginx/sites-available/fanglaw /etc/nginx/sites-enabled/fanglaw
-nginx -t
-systemctl reload nginx
 ```
 
 Это безопасный универсальный вариант.
+
+Если у вас уже включён HTTPS через Certbot, не копируйте заново
+`server/deploy/nginx/fanglaw1.ru.single-domain.http.conf` на VPS при обычной обнове.
+Этот шаблон HTTP-only и перезапишет живой конфиг с `443`, после чего браузер снова увидит
+`ERR_CONNECTION_REFUSED` на `https://fanglaw1.ru`.
 
 ---
 
@@ -99,6 +99,12 @@ ln -sf /etc/nginx/sites-available/fanglaw /etc/nginx/sites-enabled/fanglaw
 nginx -t
 systemctl reload nginx
 ```
+
+Важно:
+
+- этот шаг безопасен только до настройки HTTPS;
+- после настройки Certbot не перезаписывайте живой конфиг этим файлом без необходимости;
+- если уже настроен `https://fanglaw1.ru`, правьте боевой конфиг осторожно или заново прогоняйте `certbot --nginx`.
 
 ---
 
@@ -206,4 +212,5 @@ systemctl status nginx --no-pager
 3. `npm run build`
 4. `pm2 restart fanglaw-server --update-env`
 5. если менялся web-export — скопировать `client/web_export/*`
-6. если менялся nginx — `nginx -t && systemctl reload nginx`
+6. если менялся nginx и у вас уже есть HTTPS — не перезаписывать Certbot-конфиг HTTP-only шаблоном без необходимости
+7. после правок nginx — `nginx -t && systemctl reload nginx`

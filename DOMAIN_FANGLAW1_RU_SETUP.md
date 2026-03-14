@@ -16,6 +16,8 @@
 - `pm2` конфиг использует `PUBLIC_URL=http://fanglaw1.ru`
 - готов nginx-конфиг:
   [fanglaw1.ru.single-domain.http.conf](C:/Users/kuravella/Documents/GitHub/fanglaw/server/deploy/nginx/fanglaw1.ru.single-domain.http.conf)
+  Это HTTP-only шаблон для первого запуска до Certbot. После настройки HTTPS не нужно
+  копировать его поверх боевого конфига на VPS без необходимости, иначе пропадёт `443`.
 
 ## Что ещё нужно сделать руками
 
@@ -30,6 +32,10 @@
 4. Залить экспорт на VPS в `/var/www/fanglaw-web/current`.
 
 5. Потом включить HTTPS и перевести клиент на `wss`.
+
+После выпуска сертификата через `certbot --nginx` рабочий конфиг на VPS уже будет отличаться
+от этого шаблона. Обычные обновления проекта после этого не требуют повторного копирования
+HTTP-only файла в `/etc/nginx/sites-available/fanglaw`.
 
 ## Что изменится после HTTPS
 
