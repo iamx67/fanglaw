@@ -42,6 +42,14 @@
 endpoint="wss://fanglaw1.ru"
 ```
 
+Текущий nginx-шаблон уже содержит заголовки:
+
+- `Cross-Origin-Opener-Policy: same-origin`
+- `Cross-Origin-Embedder-Policy: require-corp`
+- `Cross-Origin-Resource-Policy: same-origin`
+
+Они нужны Godot Web после перехода на HTTPS.
+
 ## Быстрые проверки после деплоя
 
 - `http://fanglaw1.ru/api-health`
