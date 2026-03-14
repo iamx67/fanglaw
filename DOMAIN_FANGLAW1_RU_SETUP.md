@@ -48,3 +48,14 @@ endpoint="wss://fanglaw1.ru"
 - страница `http://fanglaw1.ru/`
 - вход в мир из браузера
 - вход в мир из desktop-клиента
+
+## Важно про имя стартового файла
+
+Текущая web-сборка Godot экспортируется как:
+
+- `catlaw.html`
+- `catlaw.js`
+- `catlaw.wasm`
+- `catlaw.pck`
+
+Поэтому nginx в этом проекте должен отдавать именно `catlaw.html`, а не `index.html`.
