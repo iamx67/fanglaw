@@ -6,30 +6,27 @@ import { playerIdentityStore } from "../persistence/PlayerIdentityStore.js";
 type JoinOptions = { name?: string; playerId?: string };
 type MoveMessage = { x: number; y: number };
 
-type MoveInput = {
+type GridStep = {
   x: number;
   y: number;
 };
 
-const PLAYER_SPEED = 180;
-const WORLD_MIN_X = -520;
-const WORLD_MAX_X = 520;
-const WORLD_MIN_Y = -220;
-const WORLD_MAX_Y = 220;
-const SIMULATION_INTERVAL_MS = 1000 / 20;
+const GRID_CELL_SIZE = 64;
+const WORLD_MIN_X = -512;
+const WORLD_MAX_X = 512;
+const WORLD_MIN_Y = -256;
+const WORLD_MAX_Y = 256;
+const GRID_STEP_COOLDOWN_MS = 160;
 const RECONNECT_WINDOW_SECONDS = 20;
 
 export class CatRoom extends Room<{ state: WorldState }> {
   maxClients = 100;
   autoDispose = false;
-  private readonly movementInputs = new Map<string, MoveInput>();
   private readonly sessionToPlayerId = new Map<string, string>();
+  private readonly lastMoveAt = new Map<string, number>();
 
   onCreate() {
     this.setState(new WorldState());
-    this.setSimulationInterval((deltaTime) => {
-      this.updateMovement(deltaTime);
-    }, SIMULATION_INTERVAL_MS);
 
     this.onMessage("ping", (client) => {
       const playerId = this.sessionToPlayerId.get(client.sessionId) ?? "";
@@ -54,13 +51,13 @@ export class CatRoom extends Room<{ state: WorldState }> {
         return;
       }
 
-      const input = parseMoveInput(message);
+      const step = parseGridStep(message);
 
-      if (!input) {
+      if (!step) {
         return;
       }
 
-      this.movementInputs.set(playerId, input);
+      this.tryMovePlayer(playerId, player, step);
     });
 
     console.log("CatRoom created");
@@ -75,18 +72,19 @@ export class CatRoom extends Room<{ state: WorldState }> {
     }
 
     const profile = playerIdentityStore.getOrCreateGuestProfile(playerId, getSuggestedName(options?.name));
+    const spawnPosition = snapWorldPosition(profile.x, profile.y);
 
     const player = new Player();
     player.playerId = profile.playerId;
     player.sessionId = client.sessionId;
     player.name = profile.name;
-    player.x = profile.x;
-    player.y = profile.y;
+    player.x = spawnPosition.x;
+    player.y = spawnPosition.y;
     player.connected = true;
 
     this.state.players.set(playerId, player);
     this.sessionToPlayerId.set(client.sessionId, playerId);
-    this.movementInputs.set(playerId, { x: 0, y: 0 });
+    this.lastMoveAt.set(playerId, 0);
 
     void playerIdentityStore.flush();
 
@@ -104,16 +102,14 @@ export class CatRoom extends Room<{ state: WorldState }> {
     this.sessionToPlayerId.delete(client.sessionId);
 
     if (!player) {
-      this.movementInputs.delete(playerId);
+      this.lastMoveAt.delete(playerId);
       return;
     }
-
-    this.movementInputs.set(playerId, { x: 0, y: 0 });
 
     if (code === CloseCode.CONSENTED) {
       playerIdentityStore.savePlayerSnapshot(toPlayerSnapshot(player));
       this.state.players.delete(playerId);
-      this.movementInputs.delete(playerId);
+      this.lastMoveAt.delete(playerId);
       await playerIdentityStore.flush();
       console.log(`leave ${player.name} (${playerId})`);
       return;
@@ -127,39 +123,38 @@ export class CatRoom extends Room<{ state: WorldState }> {
       this.sessionToPlayerId.set(reconnectedClient.sessionId, playerId);
       player.sessionId = reconnectedClient.sessionId;
       player.connected = true;
-      this.movementInputs.set(playerId, { x: 0, y: 0 });
+      this.lastMoveAt.set(playerId, 0);
 
       console.log(`reconnect ${player.name} (${playerId} / ${reconnectedClient.sessionId})`);
     } catch {
       playerIdentityStore.savePlayerSnapshot(toPlayerSnapshot(player));
       this.state.players.delete(playerId);
-      this.movementInputs.delete(playerId);
+      this.lastMoveAt.delete(playerId);
       await playerIdentityStore.flush();
       console.log(`leave ${player.name} (${playerId}) after reconnect timeout`);
     }
   }
 
-  private updateMovement(deltaTime: number) {
-    if (deltaTime <= 0) {
+  private tryMovePlayer(playerId: string, player: Player, step: GridStep) {
+    const lastMoveAt = this.lastMoveAt.get(playerId) ?? 0;
+    const now = Date.now();
+
+    if (now - lastMoveAt < GRID_STEP_COOLDOWN_MS) {
       return;
     }
 
-    const stepSeconds = deltaTime / 1000;
+    const snappedPosition = snapWorldPosition(player.x, player.y);
+    const nextX = snappedPosition.x + step.x * GRID_CELL_SIZE;
+    const nextY = snappedPosition.y + step.y * GRID_CELL_SIZE;
 
-    this.state.players.forEach((player, playerId) => {
-      const input = this.movementInputs.get(playerId);
+    if (!isWithinWorldBounds(nextX, nextY)) {
+      return;
+    }
 
-      if (!player.connected || !input || (input.x === 0 && input.y === 0)) {
-        return;
-      }
-
-      const nextX = player.x + input.x * PLAYER_SPEED * stepSeconds;
-      const nextY = player.y + input.y * PLAYER_SPEED * stepSeconds;
-
-      player.x = clamp(nextX, WORLD_MIN_X, WORLD_MAX_X);
-      player.y = clamp(nextY, WORLD_MIN_Y, WORLD_MAX_Y);
-      playerIdentityStore.savePlayerSnapshot(toPlayerSnapshot(player));
-    });
+    player.x = nextX;
+    player.y = nextY;
+    this.lastMoveAt.set(playerId, now);
+    playerIdentityStore.savePlayerSnapshot(toPlayerSnapshot(player));
   }
 }
 
@@ -171,7 +166,7 @@ function isFiniteNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
 }
 
-function parseMoveInput(value: unknown): MoveInput | null {
+function parseGridStep(value: unknown): GridStep | null {
   const rawX = isRecord(value) ? value.x : undefined;
   const rawY = isRecord(value) ? value.y : undefined;
 
@@ -179,29 +174,52 @@ function parseMoveInput(value: unknown): MoveInput | null {
     return null;
   }
 
-  const clampedX = clamp(rawX, -1, 1);
-  const clampedY = clamp(rawY, -1, 1);
-  const length = Math.hypot(clampedX, clampedY);
+  const stepX = toAxisStep(rawX);
+  const stepY = toAxisStep(rawY);
 
-  if (length <= 0.0001) {
-    return { x: 0, y: 0 };
+  if (stepX === 0 && stepY === 0) {
+    return null;
   }
 
-  if (length > 1) {
-    return {
-      x: clampedX / length,
-      y: clampedY / length,
-    };
+  if (stepX !== 0 && stepY !== 0) {
+    return null;
   }
 
   return {
-    x: clampedX,
-    y: clampedY,
+    x: stepX,
+    y: stepY,
   };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
+}
+
+function toAxisStep(value: number) {
+  if (value >= 0.5) {
+    return 1;
+  }
+
+  if (value <= -0.5) {
+    return -1;
+  }
+
+  return 0;
+}
+
+function snapToGrid(value: number, min: number, max: number) {
+  return clamp(Math.round(value / GRID_CELL_SIZE) * GRID_CELL_SIZE, min, max);
+}
+
+function snapWorldPosition(x: number, y: number) {
+  return {
+    x: snapToGrid(x, WORLD_MIN_X, WORLD_MAX_X),
+    y: snapToGrid(y, WORLD_MIN_Y, WORLD_MAX_Y),
+  };
+}
+
+function isWithinWorldBounds(x: number, y: number) {
+  return x >= WORLD_MIN_X && x <= WORLD_MAX_X && y >= WORLD_MIN_Y && y <= WORLD_MAX_Y;
 }
 
 function normalizePlayerId(value: unknown) {

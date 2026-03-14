@@ -2,6 +2,7 @@ extends Control
 
 const colyseus = preload("res://addons/godot_colyseus/lib/colyseus.gd")
 const CatAvatar = preload("res://scripts/cat_avatar.gd")
+const WorldGrid = preload("res://scripts/world_grid.gd")
 
 const DEFAULT_SERVER_ENDPOINT := "ws://localhost:2567"
 const SERVER_CONFIG_PATH := "res://server_config.cfg"
@@ -10,8 +11,7 @@ const SERVER_CONFIG_SECTION := "network"
 const SERVER_ENDPOINT_KEY := "endpoint"
 const ROOM_NAME := "cats"
 const PING_INTERVAL := 2.0
-const POSITION_SMOOTH_SPEED := 14.0
-const INPUT_EPSILON := 0.001
+const GRID_MOVE_REPEAT_SECONDS := 0.18
 const SETTINGS_PATH := "user://catlaw_client.cfg"
 const SETTINGS_SECTION := "profile"
 const SETTINGS_NAME_KEY := "player_name"
@@ -48,12 +48,13 @@ class RoomState extends colyseus.Schema:
 			colyseus.Field.new("players", colyseus.MAP, Player),
 		]
 
-@onready var name_input: LineEdit = $RootMargin/RootVBox/HudPanel/HudMargin/HudVBox/JoinRow/NameInput
-@onready var enter_world_button: Button = $RootMargin/RootVBox/HudPanel/HudMargin/HudVBox/JoinRow/EnterWorldButton
-@onready var status_label: Label = $RootMargin/RootVBox/HudPanel/HudMargin/HudVBox/StatusLabel
-@onready var help_label: Label = $RootMargin/RootVBox/HudPanel/HudMargin/HudVBox/HelpLabel
-@onready var debug_label: Label = $RootMargin/RootVBox/HudPanel/HudMargin/HudVBox/DebugLabel
-@onready var world_layer: Control = $RootMargin/RootVBox/WorldPanel/WorldLayer
+@onready var overlay_layer: Control = $OverlayLayer
+@onready var name_input: LineEdit = $OverlayLayer/LoginCenter/LoginPanel/LoginMargin/LoginVBox/JoinRow/NameInput
+@onready var enter_world_button: Button = $OverlayLayer/LoginCenter/LoginPanel/LoginMargin/LoginVBox/JoinRow/EnterWorldButton
+@onready var status_label: Label = $OverlayLayer/LoginCenter/LoginPanel/LoginMargin/LoginVBox/StatusLabel
+@onready var help_label: Label = $OverlayLayer/LoginCenter/LoginPanel/LoginMargin/LoginVBox/HelpLabel
+@onready var debug_label: Label = $OverlayLayer/LoginCenter/LoginPanel/LoginMargin/LoginVBox/DebugLabel
+@onready var world_layer: Control = $WorldMargin/WorldPanel/WorldLayer
 
 var client = null
 var room: colyseus.Room = null
@@ -71,8 +72,9 @@ var last_pong_text := "waiting"
 var connection_state := ConnectionState.OFFLINE
 var status_detail := ""
 var debug_enabled := OS.is_debug_build()
-var last_sent_input := Vector2.ZERO
 var server_endpoint := DEFAULT_SERVER_ENDPOINT
+var held_move_direction := Vector2.ZERO
+var move_repeat_elapsed := 0.0
 
 func _ready() -> void:
 	enter_world_button.pressed.connect(_on_enter_world_pressed)
@@ -82,6 +84,7 @@ func _ready() -> void:
 	world_layer.focus_mode = Control.FOCUS_ALL
 
 	debug_label.visible = debug_enabled
+	_ensure_world_grid()
 	_load_server_endpoint()
 	_load_local_profile()
 	_set_connection_state(ConnectionState.OFFLINE, _build_offline_detail())
@@ -95,12 +98,10 @@ func _physics_process(delta: float) -> void:
 		ping_elapsed = 0.0
 		room.send("ping")
 
-	var direction := _read_movement_input()
-	if _movement_input_changed(direction):
-		_send_movement_input(direction)
+	_handle_grid_movement_input(delta)
 
-func _process(delta: float) -> void:
-	_smooth_avatar_positions(delta)
+func _process(_delta: float) -> void:
+	_smooth_avatar_positions()
 
 func _on_name_submitted(_text: String) -> void:
 	await _on_enter_world_pressed()
@@ -189,8 +190,9 @@ func _activate_room(next_room: colyseus.Room, is_reconnect: bool) -> void:
 	room = next_room
 	local_session_id = room.session_id
 	ping_elapsed = 0.0
-	last_sent_input = Vector2.ZERO
 	last_pong_text = "reconnected" if is_reconnect else "waiting"
+	held_move_direction = Vector2.ZERO
+	move_repeat_elapsed = 0.0
 
 	_store_reconnection_token(room.reconnection_token)
 	_bind_room_events()
@@ -357,7 +359,8 @@ func _detach_room_runtime() -> void:
 	local_session_id = ""
 	ping_elapsed = 0.0
 	last_pong_text = "waiting"
-	last_sent_input = Vector2.ZERO
+	held_move_direction = Vector2.ZERO
+	move_repeat_elapsed = 0.0
 
 func _set_connection_state(next_state: int, detail: String = "") -> void:
 	connection_state = next_state
@@ -365,6 +368,8 @@ func _set_connection_state(next_state: int, detail: String = "") -> void:
 	_refresh_status_ui()
 
 func _refresh_status_ui() -> void:
+	overlay_layer.visible = connection_state != ConnectionState.CONNECTED
+
 	match connection_state:
 		ConnectionState.OFFLINE:
 			name_input.editable = true
@@ -389,7 +394,7 @@ func _refresh_status_ui() -> void:
 			enter_world_button.text = BUTTON_RETRY
 
 	status_label.text = "Status: %s" % _format_status_text()
-	help_label.text = "Room: %s | Server: %s | Move with arrow keys." % [ROOM_NAME, server_endpoint]
+	help_label.text = "Room: %s | Server: %s | Move one cell with arrow keys." % [ROOM_NAME, server_endpoint]
 	_refresh_debug_info()
 
 func _format_status_text() -> String:
@@ -462,19 +467,20 @@ func _sanitize_name(value: String) -> String:
 func _load_server_endpoint() -> void:
 	server_endpoint = _build_runtime_default_server_endpoint()
 
-	if OS.has_feature("web"):
+	var user_config := ConfigFile.new()
+	if user_config.load(USER_SERVER_CONFIG_PATH) == OK:
+		server_endpoint = _sanitize_server_endpoint(str(
+			user_config.get_value(SERVER_CONFIG_SECTION, SERVER_ENDPOINT_KEY, server_endpoint)
+		))
+		return
+
+	if OS.has_feature("web") or OS.has_feature("editor"):
 		return
 
 	var bundled_config := ConfigFile.new()
 	if bundled_config.load(SERVER_CONFIG_PATH) == OK:
 		server_endpoint = _sanitize_server_endpoint(str(
 			bundled_config.get_value(SERVER_CONFIG_SECTION, SERVER_ENDPOINT_KEY, server_endpoint)
-		))
-
-	var user_config := ConfigFile.new()
-	if user_config.load(USER_SERVER_CONFIG_PATH) == OK:
-		server_endpoint = _sanitize_server_endpoint(str(
-			user_config.get_value(SERVER_CONFIG_SECTION, SERVER_ENDPOINT_KEY, server_endpoint)
 		))
 
 func _sanitize_server_endpoint(value: String) -> String:
@@ -537,6 +543,15 @@ func _build_offline_detail() -> String:
 		return "Reconnect available. Click Enter World."
 	return "Start the server, then click Enter World."
 
+func _ensure_world_grid() -> void:
+	if world_layer.get_node_or_null("WorldGrid") != null:
+		return
+
+	var world_grid := WorldGrid.new()
+	world_grid.name = "WorldGrid"
+	world_layer.add_child(world_grid)
+	world_layer.move_child(world_grid, 0)
+
 func _sanitize_player_id(value: String) -> String:
 	var cleaned := value.strip_edges().to_lower()
 	var result := ""
@@ -590,43 +605,71 @@ func _is_expired_reconnect_error(error_text: String) -> bool:
 		or lowered.contains("[524]")
 	)
 
-func _read_movement_input() -> Vector2:
-	var input_direction := Input.get_vector("ui_left", "ui_right", "ui_up", "ui_down")
-	if input_direction == Vector2.ZERO:
-		return Vector2.ZERO
+func _handle_grid_movement_input(delta: float) -> void:
+	var pressed_direction := _read_pressed_grid_direction()
+	if pressed_direction != Vector2.ZERO:
+		_send_grid_move(pressed_direction)
+		held_move_direction = pressed_direction
+		move_repeat_elapsed = 0.0
+		return
 
-	return input_direction.normalized()
+	var held_direction := _read_held_grid_direction()
+	if held_direction == Vector2.ZERO:
+		held_move_direction = Vector2.ZERO
+		move_repeat_elapsed = 0.0
+		return
 
-func _movement_input_changed(next_input: Vector2) -> bool:
-	return last_sent_input.distance_to(next_input) > INPUT_EPSILON
+	if held_direction != held_move_direction:
+		held_move_direction = held_direction
+		move_repeat_elapsed = 0.0
+		return
 
-func _send_movement_input(input_direction: Vector2) -> void:
+	move_repeat_elapsed += delta
+	if move_repeat_elapsed >= GRID_MOVE_REPEAT_SECONDS:
+		move_repeat_elapsed = 0.0
+		_send_grid_move(held_direction)
+
+func _read_pressed_grid_direction() -> Vector2:
+	if Input.is_action_just_pressed("ui_left"):
+		return Vector2.LEFT
+	if Input.is_action_just_pressed("ui_right"):
+		return Vector2.RIGHT
+	if Input.is_action_just_pressed("ui_up"):
+		return Vector2.UP
+	if Input.is_action_just_pressed("ui_down"):
+		return Vector2.DOWN
+	return Vector2.ZERO
+
+func _read_held_grid_direction() -> Vector2:
+	if Input.is_action_pressed("ui_left"):
+		return Vector2.LEFT
+	if Input.is_action_pressed("ui_right"):
+		return Vector2.RIGHT
+	if Input.is_action_pressed("ui_up"):
+		return Vector2.UP
+	if Input.is_action_pressed("ui_down"):
+		return Vector2.DOWN
+	return Vector2.ZERO
+
+func _send_grid_move(direction: Vector2) -> void:
 	if room == null or not room.has_joined():
 		return
 
-	last_sent_input = input_direction
 	room.send("move", {
-		"x": input_direction.x,
-		"y": input_direction.y,
+		"x": int(direction.x),
+		"y": int(direction.y),
 	})
 
-func _smooth_avatar_positions(delta: float) -> void:
+func _smooth_avatar_positions() -> void:
 	if avatars.is_empty():
 		return
-
-	var weight: float = clamp(delta * POSITION_SMOOTH_SPEED, 0.0, 1.0)
 
 	for player_id in avatars.keys():
 		var avatar: Control = avatars.get(player_id)
 		if avatar == null or not avatar_target_positions.has(player_id):
 			continue
 
-		var target: Vector2 = avatar_target_positions[player_id]
-		var next_position: Vector2 = avatar.position.lerp(target, weight)
-		if next_position.distance_to(target) <= 0.5:
-			next_position = target
-
-		avatar.position = next_position
+		avatar.position = avatar_target_positions[player_id]
 
 func _get_players_map(state):
 	if state == null:
