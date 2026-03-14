@@ -15,7 +15,7 @@ module.exports = {
       env: {
         NODE_ENV: "production",
         PORT: 2567,
-        PUBLIC_URL: "http://5.129.247.170:2567",
+        PUBLIC_URL: "http://fanglaw1.ru",
         WORLD_ROOM_NAME: "cats",
         WORLD_KEY: "main_world",
       },

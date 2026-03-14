@@ -460,7 +460,10 @@ func _sanitize_name(value: String) -> String:
 	return result.substr(0, 16)
 
 func _load_server_endpoint() -> void:
-	server_endpoint = DEFAULT_SERVER_ENDPOINT
+	server_endpoint = _build_runtime_default_server_endpoint()
+
+	if OS.has_feature("web"):
+		return
 
 	var bundled_config := ConfigFile.new()
 	if bundled_config.load(SERVER_CONFIG_PATH) == OK:
@@ -479,6 +482,19 @@ func _sanitize_server_endpoint(value: String) -> String:
 	if result.begins_with("ws://") or result.begins_with("wss://"):
 		return result
 	return DEFAULT_SERVER_ENDPOINT
+
+func _build_runtime_default_server_endpoint() -> String:
+	if not OS.has_feature("web"):
+		return DEFAULT_SERVER_ENDPOINT
+
+	var browser_host := str(JavaScriptBridge.eval("window.location.host"))
+	var browser_protocol := str(JavaScriptBridge.eval("window.location.protocol"))
+
+	if browser_host.is_empty():
+		return DEFAULT_SERVER_ENDPOINT
+
+	var scheme := "wss://" if browser_protocol == "https:" else "ws://"
+	return scheme + browser_host
 
 func _load_local_profile() -> void:
 	var config := ConfigFile.new()
