@@ -93,8 +93,12 @@ func _create_match_make_request(
 	var room = CRoom.new(room_data["name"], schema_type)
 	room.room_id = room_data["roomId"]
 	room.session_id = response["sessionId"]
-	
-	room.connect_remote(_build_endpoint(room_data, { "sessionId": room.session_id }))
+
+	var connection_params := { "sessionId": room.session_id }
+	if method == "reconnect" and options != null and options.has("reconnectionToken"):
+		connection_params["reconnectionToken"] = str(options["reconnectionToken"])
+
+	room.connect_remote(_build_endpoint(room_data, connection_params))
 	
 	room.on_join.once(Callable(self, "_room_joined"), [promise, room])
 	room.on_error.once(Callable(self, "_room_error"), [promise, room])

@@ -1,0 +1,8 @@
+server/node_modules/
+server/dist/
+server/*.log
+server/*.stdout.log
+server/*.stderr.log
+server/.env
+server/data/players.json
+client/.godot/

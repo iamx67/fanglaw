@@ -8,15 +8,20 @@ import { Schema, type, MapSchema } from "@colyseus/schema";
 export class Player extends Schema {
     constructor() {
         super(...arguments);
-        this.id = "";
+        this.playerId = "";
+        this.sessionId = "";
         this.name = "Cat";
         this.x = 0;
         this.y = 0;
+        this.connected = true;
     }
 }
 __decorate([
     type("string")
-], Player.prototype, "id", void 0);
+], Player.prototype, "playerId", void 0);
+__decorate([
+    type("string")
+], Player.prototype, "sessionId", void 0);
 __decorate([
     type("string")
 ], Player.prototype, "name", void 0);
@@ -26,6 +31,9 @@ __decorate([
 __decorate([
     type("number")
 ], Player.prototype, "y", void 0);
+__decorate([
+    type("boolean")
+], Player.prototype, "connected", void 0);
 export class WorldState extends Schema {
     constructor() {
         super(...arguments);
