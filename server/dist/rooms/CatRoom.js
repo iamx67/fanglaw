@@ -1,12 +1,22 @@
 import { Room } from "colyseus";
 import { Player, WorldState } from "./schema/WorldState.js";
+const PLAYER_SPEED = 180;
+const WORLD_MIN_X = -520;
+const WORLD_MAX_X = 520;
+const WORLD_MIN_Y = -220;
+const WORLD_MAX_Y = 220;
+const SIMULATION_INTERVAL_MS = 1000 / 20;
 export class CatRoom extends Room {
     constructor() {
         super(...arguments);
         this.maxClients = 100;
+        this.movementInputs = new Map();
     }
     onCreate() {
         this.setState(new WorldState());
+        this.setSimulationInterval((deltaTime) => {
+            this.updateMovement(deltaTime);
+        }, SIMULATION_INTERVAL_MS);
         this.onMessage("ping", (client) => {
             client.send("pong", {
                 sessionId: client.sessionId,
@@ -18,11 +28,11 @@ export class CatRoom extends Room {
             if (!player) {
                 return;
             }
-            if (!isFiniteNumber(message?.x) || !isFiniteNumber(message?.y)) {
+            const input = parseMoveInput(message);
+            if (!input) {
                 return;
             }
-            player.x = clamp(message.x, -10_000, 10_000);
-            player.y = clamp(message.y, -10_000, 10_000);
+            this.movementInputs.set(client.sessionId, input);
         });
         console.log("CatRoom created");
     }
@@ -33,11 +43,29 @@ export class CatRoom extends Room {
         player.x = 0;
         player.y = 0;
         this.state.players.set(client.sessionId, player);
+        this.movementInputs.set(client.sessionId, { x: 0, y: 0 });
         console.log(`join ${player.name} (${client.sessionId})`);
     }
     onLeave(client) {
         this.state.players.delete(client.sessionId);
+        this.movementInputs.delete(client.sessionId);
         console.log(`leave ${client.sessionId}`);
+    }
+    updateMovement(deltaTime) {
+        if (deltaTime <= 0) {
+            return;
+        }
+        const stepSeconds = deltaTime / 1000;
+        this.state.players.forEach((player, sessionId) => {
+            const input = this.movementInputs.get(sessionId);
+            if (!input || (input.x === 0 && input.y === 0)) {
+                return;
+            }
+            const nextX = player.x + input.x * PLAYER_SPEED * stepSeconds;
+            const nextY = player.y + input.y * PLAYER_SPEED * stepSeconds;
+            player.x = clamp(nextX, WORLD_MIN_X, WORLD_MAX_X);
+            player.y = clamp(nextY, WORLD_MIN_Y, WORLD_MAX_Y);
+        });
     }
 }
 function clamp(value, min, max) {
@@ -45,6 +73,32 @@ function clamp(value, min, max) {
 }
 function isFiniteNumber(value) {
     return typeof value === "number" && Number.isFinite(value);
+}
+function parseMoveInput(value) {
+    const rawX = isRecord(value) ? value.x : undefined;
+    const rawY = isRecord(value) ? value.y : undefined;
+    if (!isFiniteNumber(rawX) || !isFiniteNumber(rawY)) {
+        return null;
+    }
+    const clampedX = clamp(rawX, -1, 1);
+    const clampedY = clamp(rawY, -1, 1);
+    const length = Math.hypot(clampedX, clampedY);
+    if (length <= 0.0001) {
+        return { x: 0, y: 0 };
+    }
+    if (length > 1) {
+        return {
+            x: clampedX / length,
+            y: clampedY / length,
+        };
+    }
+    return {
+        x: clampedX,
+        y: clampedY,
+    };
+}
+function isRecord(value) {
+    return typeof value === "object" && value !== null;
 }
 function normalizeName(value) {
     const fallback = "Cat";

@@ -89,6 +89,12 @@ modulate = Color(0.8, 0.839216, 0.878431, 0.85)
 layout_mode = 2
 text = "Run the server, then click Enter World. Move with arrow keys."
 
+[node name="DebugLabel" type="Label" parent="RootMargin/RootVBox/HudPanel/HudMargin/HudVBox" unique_id=1083902152]
+visible = false
+modulate = Color(0.721569, 0.85098, 0.972549, 0.8)
+layout_mode = 2
+text = "Debug"
+
 [node name="WorldPanel" type="PanelContainer" parent="RootMargin/RootVBox" unique_id=467929030]
 layout_mode = 2
 size_flags_vertical = 3
