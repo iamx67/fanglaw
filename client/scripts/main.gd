@@ -12,6 +12,7 @@ const SERVER_ENDPOINT_KEY := "endpoint"
 const ROOM_NAME := "cats"
 const PING_INTERVAL := 2.0
 const GRID_MOVE_REPEAT_SECONDS := 0.18
+const CELL_TRANSITION_DURATION := 0.18
 const SETTINGS_PATH := "user://catlaw_client.cfg"
 const SETTINGS_SECTION := "profile"
 const SETTINGS_NAME_KEY := "player_name"
@@ -48,13 +49,14 @@ class RoomState extends colyseus.Schema:
 			colyseus.Field.new("players", colyseus.MAP, Player),
 		]
 
-@onready var overlay_layer: Control = $OverlayLayer
-@onready var name_input: LineEdit = $OverlayLayer/LoginCenter/LoginPanel/LoginMargin/LoginVBox/JoinRow/NameInput
-@onready var enter_world_button: Button = $OverlayLayer/LoginCenter/LoginPanel/LoginMargin/LoginVBox/JoinRow/EnterWorldButton
-@onready var status_label: Label = $OverlayLayer/LoginCenter/LoginPanel/LoginMargin/LoginVBox/StatusLabel
-@onready var help_label: Label = $OverlayLayer/LoginCenter/LoginPanel/LoginMargin/LoginVBox/HelpLabel
-@onready var debug_label: Label = $OverlayLayer/LoginCenter/LoginPanel/LoginMargin/LoginVBox/DebugLabel
-@onready var world_layer: Control = $WorldMargin/WorldPanel/WorldLayer
+@onready var world_view: WorldView = $WorldView
+@onready var start_screen: StartScreen = $StartScreen
+@onready var name_input: LineEdit = start_screen.name_input
+@onready var enter_world_button: Button = start_screen.enter_world_button
+@onready var status_label: Label = start_screen.status_label
+@onready var help_label: Label = start_screen.help_label
+@onready var debug_label: Label = start_screen.debug_label
+@onready var world_layer: Control = world_view.world_layer
 
 var client = null
 var room: colyseus.Room = null
@@ -77,11 +79,9 @@ var held_move_direction := Vector2.ZERO
 var move_repeat_elapsed := 0.0
 
 func _ready() -> void:
-	enter_world_button.pressed.connect(_on_enter_world_pressed)
-	name_input.text_submitted.connect(_on_name_submitted)
-	name_input.text_changed.connect(_on_name_changed)
+	start_screen.enter_requested.connect(_on_enter_world_pressed)
+	start_screen.name_changed.connect(_on_name_changed)
 	world_layer.resized.connect(_refresh_all_avatar_positions)
-	world_layer.focus_mode = Control.FOCUS_ALL
 
 	debug_label.visible = debug_enabled
 	_ensure_world_grid()
@@ -100,11 +100,8 @@ func _physics_process(delta: float) -> void:
 
 	_handle_grid_movement_input(delta)
 
-func _process(_delta: float) -> void:
-	_smooth_avatar_positions()
-
-func _on_name_submitted(_text: String) -> void:
-	await _on_enter_world_pressed()
+func _process(delta: float) -> void:
+	_smooth_avatar_positions(delta)
 
 func _on_name_changed(new_text: String) -> void:
 	_save_local_name(new_text)
@@ -197,9 +194,8 @@ func _activate_room(next_room: colyseus.Room, is_reconnect: bool) -> void:
 	_store_reconnection_token(room.reconnection_token)
 	_bind_room_events()
 
-	name_input.release_focus()
-	enter_world_button.release_focus()
-	world_layer.grab_focus()
+	start_screen.release_form_focus()
+	world_view.grab_world_focus()
 
 func _bind_room_events() -> void:
 	var state = room.get_state()
@@ -368,7 +364,7 @@ func _set_connection_state(next_state: int, detail: String = "") -> void:
 	_refresh_status_ui()
 
 func _refresh_status_ui() -> void:
-	overlay_layer.visible = connection_state != ConnectionState.CONNECTED
+	start_screen.visible = connection_state != ConnectionState.CONNECTED
 
 	match connection_state:
 		ConnectionState.OFFLINE:
@@ -655,21 +651,43 @@ func _send_grid_move(direction: Vector2) -> void:
 	if room == null or not room.has_joined():
 		return
 
+	_predict_local_grid_move(direction)
+
 	room.send("move", {
 		"x": int(direction.x),
 		"y": int(direction.y),
 	})
 
-func _smooth_avatar_positions() -> void:
+func _smooth_avatar_positions(delta: float) -> void:
 	if avatars.is_empty():
 		return
+
+	var transition_speed := WorldGrid.CELL_SIZE / CELL_TRANSITION_DURATION
 
 	for player_id in avatars.keys():
 		var avatar: Control = avatars.get(player_id)
 		if avatar == null or not avatar_target_positions.has(player_id):
 			continue
 
-		avatar.position = avatar_target_positions[player_id]
+		var target_position: Vector2 = avatar_target_positions[player_id]
+		avatar.position = avatar.position.move_toward(target_position, transition_speed * delta)
+
+		if avatar.position.distance_to(target_position) <= 1.0:
+			avatar.position = target_position
+
+func _predict_local_grid_move(direction: Vector2) -> void:
+	if local_player_id.is_empty() or not avatars.has(local_player_id):
+		return
+
+	var predicted_position := local_position + (direction * WorldGrid.CELL_SIZE)
+	predicted_position.x = clampf(predicted_position.x, WorldGrid.WORLD_MIN_X, WorldGrid.WORLD_MAX_X)
+	predicted_position.y = clampf(predicted_position.y, WorldGrid.WORLD_MIN_Y, WorldGrid.WORLD_MAX_Y)
+
+	if predicted_position == local_position:
+		return
+
+	local_position = predicted_position
+	_set_avatar_target(local_player_id, predicted_position)
 
 func _get_players_map(state):
 	if state == null:

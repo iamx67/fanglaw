@@ -6,9 +6,9 @@ const WORLD_MIN_X := -512.0
 const WORLD_MAX_X := 512.0
 const WORLD_MIN_Y := -256.0
 const WORLD_MAX_Y := 256.0
-const GRID_FILL_COLOR := Color(0.0862745, 0.109804, 0.141176, 0.45)
-const GRID_LINE_COLOR := Color(0.25098, 0.341176, 0.435294, 0.45)
-const GRID_BORDER_COLOR := Color(0.580392, 0.698039, 0.815686, 0.3)
+const GRID_FILL_COLOR := Color(0.117647, 0.141176, 0.160784, 0.0)
+const GRID_LINE_COLOR := Color(0.52549, 0.619608, 0.678431, 0.12)
+const GRID_BORDER_COLOR := Color(0.729412, 0.807843, 0.862745, 0.18)
 
 func _init() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE

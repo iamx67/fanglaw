@@ -1,0 +1,104 @@
+[gd_scene format=3 uid="uid://c8l3i4uxx0d0u"]
+
+[ext_resource type="Script" path="res://scripts/start_screen.gd" id="1_start_screen"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_login"]
+bg_color = Color(0.164706, 0.192157, 0.219608, 0.96)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.388235, 0.470588, 0.537255, 0.55)
+corner_radius_top_left = 20
+corner_radius_top_right = 20
+corner_radius_bottom_right = 20
+corner_radius_bottom_left = 20
+shadow_color = Color(0, 0, 0, 0.18)
+shadow_size = 10
+
+[node name="StartScreen" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_start_screen")
+
+[node name="OverlayShade" type="ColorRect" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0.0745098, 0.0901961, 0.105882, 0.7)
+
+[node name="LoginCenter" type="CenterContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="LoginPanel" type="PanelContainer" parent="LoginCenter"]
+custom_minimum_size = Vector2(620, 0)
+layout_mode = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_login")
+
+[node name="LoginMargin" type="MarginContainer" parent="LoginCenter/LoginPanel"]
+layout_mode = 2
+theme_override_constants/margin_left = 28
+theme_override_constants/margin_top = 24
+theme_override_constants/margin_right = 28
+theme_override_constants/margin_bottom = 24
+
+[node name="LoginVBox" type="VBoxContainer" parent="LoginCenter/LoginPanel/LoginMargin"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="TitleLabel" type="Label" parent="LoginCenter/LoginPanel/LoginMargin/LoginVBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 30
+text = "Enter Catlaw"
+
+[node name="IntroLabel" type="Label" parent="LoginCenter/LoginPanel/LoginMargin/LoginVBox"]
+modulate = Color(0.843137, 0.890196, 0.917647, 0.88)
+layout_mode = 2
+text = "Choose a name and enter the world."
+
+[node name="JoinRow" type="HBoxContainer" parent="LoginCenter/LoginPanel/LoginMargin/LoginVBox"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="NameLabel" type="Label" parent="LoginCenter/LoginPanel/LoginMargin/LoginVBox/JoinRow"]
+layout_mode = 2
+text = "Name"
+
+[node name="NameInput" type="LineEdit" parent="LoginCenter/LoginPanel/LoginMargin/LoginVBox/JoinRow"]
+custom_minimum_size = Vector2(260, 0)
+layout_mode = 2
+size_flags_horizontal = 3
+text = "name"
+placeholder_text = "name"
+
+[node name="EnterWorldButton" type="Button" parent="LoginCenter/LoginPanel/LoginMargin/LoginVBox/JoinRow"]
+custom_minimum_size = Vector2(170, 0)
+layout_mode = 2
+text = "Enter World"
+
+[node name="StatusLabel" type="Label" parent="LoginCenter/LoginPanel/LoginMargin/LoginVBox"]
+layout_mode = 2
+text = "Status: offline"
+
+[node name="HelpLabel" type="Label" parent="LoginCenter/LoginPanel/LoginMargin/LoginVBox"]
+modulate = Color(0.843137, 0.890196, 0.917647, 0.82)
+layout_mode = 2
+text = "Run the server, then click Enter World. Move one cell with arrow keys."
+
+[node name="DebugLabel" type="Label" parent="LoginCenter/LoginPanel/LoginMargin/LoginVBox"]
+visible = false
+modulate = Color(0.658824, 0.839216, 0.929412, 0.8)
+layout_mode = 2
+text = "Debug"
