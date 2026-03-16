@@ -214,3 +214,14 @@ systemctl status nginx --no-pager
 5. если менялся web-export — скопировать `client/web_export/*`
 6. если менялся nginx и у вас уже есть HTTPS — не перезаписывать Certbot-конфиг HTTP-only шаблоном без необходимости
 7. после правок nginx — `nginx -t && systemctl reload nginx`
+# Update note, 2026-03-16
+
+Если браузерная версия на VPS грузится слишком долго повторно, не используйте
+для продакшена `server/deploy/nginx/fanglaw1.ru.single-domain.http.conf`.
+Этот шаблон намеренно выставляет `Cache-Control: no-store` для `html/js/wasm/pck`
+и удобен только во время активной разработки.
+
+Для боевой или полу-боевой браузерной версии используйте:
+
+- `server/deploy/nginx/fanglaw1.ru.single-domain.prod.conf`
+- краткая инструкция: `server/deploy/nginx/PROD_CACHE_RU.md`
