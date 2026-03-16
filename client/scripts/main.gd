@@ -1,8 +1,8 @@
 extends Control
 
 const colyseus = preload("res://addons/godot_colyseus/lib/colyseus.gd")
-const CatAvatar = preload("res://scripts/cat_avatar.gd")
-const WorldGrid = preload("res://scripts/world_grid.gd")
+const PlayerAvatarScene = preload("res://scenes/player_avatar.tscn")
+const WorldConfig = preload("res://scripts/world_config.gd")
 
 const DEFAULT_SERVER_ENDPOINT := "ws://localhost:2567"
 const SERVER_CONFIG_PATH := "res://server_config.cfg"
@@ -11,18 +11,15 @@ const SERVER_CONFIG_SECTION := "network"
 const SERVER_ENDPOINT_KEY := "endpoint"
 const ROOM_NAME := "cats"
 const PING_INTERVAL := 2.0
+const AUTO_CONNECT_RETRY_SECONDS := 3.0
 const GRID_MOVE_REPEAT_SECONDS := 0.18
 const CELL_TRANSITION_DURATION := 0.18
+const RANDOM_NAME_LENGTH := 8
+const RANDOM_NAME_ALPHABET := "abcdefghijklmnopqrstuvwxyz"
 const SETTINGS_PATH := "user://catlaw_client.cfg"
 const SETTINGS_SECTION := "profile"
-const SETTINGS_NAME_KEY := "player_name"
 const SETTINGS_PLAYER_ID_KEY := "player_id"
 const SETTINGS_RECONNECT_TOKEN_KEY := "reconnection_token"
-const BUTTON_ENTER_WORLD := "Enter World"
-const BUTTON_CONNECTING := "Connecting..."
-const BUTTON_RECONNECTING := "Reconnecting..."
-const BUTTON_IN_WORLD := "In World"
-const BUTTON_RETRY := "Retry Connection"
 
 enum ConnectionState {
 	OFFLINE,
@@ -50,44 +47,34 @@ class RoomState extends colyseus.Schema:
 		]
 
 @onready var world_view: WorldView = $WorldView
-@onready var start_screen: StartScreen = $StartScreen
-@onready var name_input: LineEdit = start_screen.name_input
-@onready var enter_world_button: Button = start_screen.enter_world_button
-@onready var status_label: Label = start_screen.status_label
-@onready var help_label: Label = start_screen.help_label
-@onready var debug_label: Label = start_screen.debug_label
-@onready var world_layer: Control = world_view.world_layer
 
 var client = null
 var room: colyseus.Room = null
 var local_player_id := ""
 var local_session_id := ""
 var local_position := Vector2.ZERO
+var current_player_name := ""
 var current_reconnection_token := ""
 var avatars: Dictionary = {}
 var avatar_target_positions: Dictionary = {}
 var avatar_world_positions: Dictionary = {}
 var tracked_player_refs: Dictionary = {}
 var is_connecting := false
+var auto_connect_retry_scheduled := false
 var ping_elapsed := 0.0
 var last_pong_text := "waiting"
 var connection_state := ConnectionState.OFFLINE
 var status_detail := ""
-var debug_enabled := OS.is_debug_build()
 var server_endpoint := DEFAULT_SERVER_ENDPOINT
 var held_move_direction := Vector2.ZERO
 var move_repeat_elapsed := 0.0
 
 func _ready() -> void:
-	start_screen.enter_requested.connect(_on_enter_world_pressed)
-	start_screen.name_changed.connect(_on_name_changed)
-	world_layer.resized.connect(_refresh_all_avatar_positions)
-
-	debug_label.visible = debug_enabled
-	_ensure_world_grid()
 	_load_server_endpoint()
 	_load_local_profile()
-	_set_connection_state(ConnectionState.OFFLINE, _build_offline_detail())
+	current_player_name = _generate_random_player_name()
+	_set_connection_state(ConnectionState.OFFLINE, "Auto-connect is starting.")
+	call_deferred("_begin_auto_connect")
 
 func _physics_process(delta: float) -> void:
 	if room == null or not room.has_joined():
@@ -102,19 +89,11 @@ func _physics_process(delta: float) -> void:
 
 func _process(delta: float) -> void:
 	_smooth_avatar_positions(delta)
+	_sync_camera_to_local_avatar()
 
-func _on_name_changed(new_text: String) -> void:
-	_save_local_name(new_text)
-
-func _on_enter_world_pressed() -> void:
-	if is_connecting:
-		return
-
-	if room != null and room.has_joined():
-		return
-
+func _begin_auto_connect() -> void:
 	if _has_reconnection_token():
-		await _reconnect_to_world(false)
+		await _reconnect_to_world(true)
 	else:
 		await _connect_to_world()
 
@@ -124,15 +103,14 @@ func _connect_to_world() -> void:
 	if room == null and not _has_reconnection_token() and not avatars.is_empty():
 		_clear_world()
 
-	var player_name := _sanitize_name(name_input.text)
-	name_input.text = player_name
-	_save_local_name(player_name)
-
-	_set_connection_state(ConnectionState.CONNECTING, "Connecting to %s ..." % server_endpoint)
+	_set_connection_state(
+		ConnectionState.CONNECTING,
+		"Connecting to %s as %s ..." % [server_endpoint, current_player_name]
+	)
 
 	client = colyseus.Client.new(server_endpoint)
 	var promise = client.join(RoomState, ROOM_NAME, {
-		"name": player_name,
+		"name": current_player_name,
 		"playerId": local_player_id,
 	})
 
@@ -142,11 +120,15 @@ func _connect_to_world() -> void:
 
 	if promise.get_state() == promise.State.Failed:
 		_detach_room_runtime()
-		_set_connection_state(ConnectionState.FAILED, "Connect failed: %s" % str(promise.get_error()))
+		_set_connection_state(
+			ConnectionState.FAILED,
+			"Connect failed: %s. Retrying in %.1fs." % [str(promise.get_error()), AUTO_CONNECT_RETRY_SECONDS]
+		)
+		_queue_auto_connect_retry()
 		return
 
 	_activate_room(promise.get_data(), false)
-	_set_connection_state(ConnectionState.CONNECTED, "Connected to %s as %s." % [ROOM_NAME, player_name])
+	_set_connection_state(ConnectionState.CONNECTED, "Connected to %s as %s." % [ROOM_NAME, current_player_name])
 
 func _reconnect_to_world(auto_attempt: bool) -> void:
 	if not _has_reconnection_token():
@@ -171,17 +153,19 @@ func _reconnect_to_world(auto_attempt: bool) -> void:
 		if _is_expired_reconnect_error(error_text):
 			_clear_reconnection_token()
 			_clear_world()
-			if auto_attempt:
-				_set_connection_state(ConnectionState.FAILED, "Reconnect expired. Click Retry Connection to join again.")
-			else:
-				await _connect_to_world()
+			_set_connection_state(ConnectionState.FAILED, "Reconnect expired. Starting a fresh session.")
+			await _connect_to_world()
 		else:
-			_set_connection_state(ConnectionState.FAILED, "Reconnect failed: %s" % error_text)
+			_set_connection_state(
+				ConnectionState.FAILED,
+				"Reconnect failed: %s. Retrying in %.1fs." % [error_text, AUTO_CONNECT_RETRY_SECONDS]
+			)
+			_queue_auto_connect_retry()
 
 		return
 
 	_activate_room(promise.get_data(), true)
-	_set_connection_state(ConnectionState.CONNECTED, "Reconnected to %s as %s." % [ROOM_NAME, name_input.text])
+	_set_connection_state(ConnectionState.CONNECTED, "Reconnected to %s as %s." % [ROOM_NAME, _display_player_name_from_id(local_player_id)])
 
 func _activate_room(next_room: colyseus.Room, is_reconnect: bool) -> void:
 	room = next_room
@@ -193,8 +177,6 @@ func _activate_room(next_room: colyseus.Room, is_reconnect: bool) -> void:
 
 	_store_reconnection_token(room.reconnection_token)
 	_bind_room_events()
-
-	start_screen.release_form_focus()
 	world_view.grab_world_focus()
 
 func _bind_room_events() -> void:
@@ -215,7 +197,8 @@ func _on_room_error(code: int, message: String) -> void:
 	if room != null and room.has_joined() and _has_reconnection_token():
 		_set_connection_state(ConnectionState.RECONNECTING, error_text)
 	else:
-		_set_connection_state(ConnectionState.FAILED, error_text)
+		_set_connection_state(ConnectionState.FAILED, "%s. Retrying in %.1fs." % [error_text, AUTO_CONNECT_RETRY_SECONDS])
+		_queue_auto_connect_retry()
 
 func _on_room_leave() -> void:
 	_detach_room_runtime()
@@ -225,7 +208,8 @@ func _on_room_leave() -> void:
 		call_deferred("_auto_reconnect_after_drop")
 	else:
 		_clear_world()
-		_set_connection_state(ConnectionState.FAILED, "Connection lost.")
+		_set_connection_state(ConnectionState.FAILED, "Connection lost. Retrying in %.1fs." % AUTO_CONNECT_RETRY_SECONDS)
+		_queue_auto_connect_retry()
 
 func _auto_reconnect_after_drop() -> void:
 	if is_connecting or room != null or not _has_reconnection_token():
@@ -280,9 +264,9 @@ func _register_player(player_id: String, player: Player) -> void:
 	var avatar = avatars.get(player_id)
 	var is_new_avatar := avatar == null
 	if avatar == null:
-		avatar = CatAvatar.new()
-		avatar.name = "CatAvatar_%s" % player_id
-		world_layer.add_child(avatar)
+		avatar = PlayerAvatarScene.instantiate()
+		avatar.name = "PlayerAvatar_%s" % player_id
+		world_view.players_layer.add_child(avatar)
 		avatars[player_id] = avatar
 
 	if tracked_player_refs.get(player_id) != player:
@@ -306,11 +290,12 @@ func _set_avatar_target(player_id: String, world_position: Vector2, snap_to_targ
 		return
 
 	avatar_world_positions[player_id] = world_position
-	var screen_position := _world_to_screen(world_position) - (CatAvatar.AVATAR_SIZE * 0.5)
-	avatar_target_positions[player_id] = screen_position
+	avatar_target_positions[player_id] = world_position
+	if avatar.has_method("set_moving"):
+		avatar.set_moving(not snap_to_target and avatar.position.distance_to(world_position) > 1.0)
 
 	if snap_to_target:
-		avatar.position = screen_position
+		avatar.position = world_position
 
 func _refresh_all_avatar_positions() -> void:
 	if room == null:
@@ -347,6 +332,7 @@ func _clear_world() -> void:
 	avatar_target_positions.clear()
 	avatar_world_positions.clear()
 	tracked_player_refs.clear()
+	world_view.reset_camera()
 	_refresh_debug_info()
 
 func _detach_room_runtime() -> void:
@@ -361,37 +347,7 @@ func _detach_room_runtime() -> void:
 func _set_connection_state(next_state: int, detail: String = "") -> void:
 	connection_state = next_state
 	status_detail = detail
-	_refresh_status_ui()
-
-func _refresh_status_ui() -> void:
-	start_screen.visible = connection_state != ConnectionState.CONNECTED
-
-	match connection_state:
-		ConnectionState.OFFLINE:
-			name_input.editable = true
-			enter_world_button.disabled = false
-			enter_world_button.text = BUTTON_ENTER_WORLD
-		ConnectionState.CONNECTING:
-			name_input.editable = false
-			enter_world_button.disabled = true
-			enter_world_button.text = BUTTON_CONNECTING
-		ConnectionState.CONNECTED:
-			name_input.editable = false
-			enter_world_button.disabled = true
-			enter_world_button.text = BUTTON_IN_WORLD
-		ConnectionState.RECONNECTING:
-			var can_retry := not is_connecting and (room == null or not room.has_joined())
-			name_input.editable = false
-			enter_world_button.disabled = not can_retry
-			enter_world_button.text = BUTTON_RETRY if can_retry else BUTTON_RECONNECTING
-		ConnectionState.FAILED:
-			name_input.editable = true
-			enter_world_button.disabled = false
-			enter_world_button.text = BUTTON_RETRY
-
-	status_label.text = "Status: %s" % _format_status_text()
-	help_label.text = "Room: %s | Server: %s | Move one cell with arrow keys." % [ROOM_NAME, server_endpoint]
-	_refresh_debug_info()
+	print("[network] %s" % _format_status_text())
 
 func _format_status_text() -> String:
 	var state_text := _connection_state_text(connection_state)
@@ -415,17 +371,7 @@ func _connection_state_text(state: int) -> String:
 			return "unknown"
 
 func _refresh_debug_info() -> void:
-	if not debug_enabled:
-		debug_label.visible = false
-		return
-
-	debug_label.visible = true
-	debug_label.text = "Debug: playerId=%s | sessionId=%s | players=%d | ping=%s" % [
-		_get_debug_player_id(),
-		_get_debug_session_id(),
-		_get_player_count(),
-		last_pong_text,
-	]
+	pass
 
 func _get_debug_player_id() -> String:
 	if local_player_id.is_empty():
@@ -500,22 +446,13 @@ func _build_runtime_default_server_endpoint() -> String:
 
 func _load_local_profile() -> void:
 	var config := ConfigFile.new()
-	var load_result := config.load(SETTINGS_PATH)
-
-	var saved_name := name_input.text
-	if load_result == OK:
-		saved_name = str(config.get_value(SETTINGS_SECTION, SETTINGS_NAME_KEY, name_input.text))
+	if config.load(SETTINGS_PATH) == OK:
 		local_player_id = _sanitize_player_id(str(config.get_value(SETTINGS_SECTION, SETTINGS_PLAYER_ID_KEY, "")))
 		current_reconnection_token = str(config.get_value(SETTINGS_SECTION, SETTINGS_RECONNECT_TOKEN_KEY, ""))
 
 	if local_player_id.is_empty():
 		local_player_id = _generate_guest_player_id()
 		_save_profile_value(SETTINGS_PLAYER_ID_KEY, local_player_id)
-
-	name_input.text = _sanitize_name(saved_name)
-
-func _save_local_name(value: String) -> void:
-	_save_profile_value(SETTINGS_NAME_KEY, _sanitize_name(value))
 
 func _save_profile_value(key: String, value) -> void:
 	var config := ConfigFile.new()
@@ -533,20 +470,6 @@ func _clear_reconnection_token() -> void:
 
 func _has_reconnection_token() -> bool:
 	return not current_reconnection_token.strip_edges().is_empty()
-
-func _build_offline_detail() -> String:
-	if _has_reconnection_token():
-		return "Reconnect available. Click Enter World."
-	return "Start the server, then click Enter World."
-
-func _ensure_world_grid() -> void:
-	if world_layer.get_node_or_null("WorldGrid") != null:
-		return
-
-	var world_grid := WorldGrid.new()
-	world_grid.name = "WorldGrid"
-	world_layer.add_child(world_grid)
-	world_layer.move_child(world_grid, 0)
 
 func _sanitize_player_id(value: String) -> String:
 	var cleaned := value.strip_edges().to_lower()
@@ -574,6 +497,17 @@ func _generate_guest_player_id() -> String:
 	]
 	return _sanitize_player_id("guest_%s" % raw)
 
+func _generate_random_player_name() -> String:
+	var rng := RandomNumberGenerator.new()
+	rng.randomize()
+	var result := ""
+
+	for _i in RANDOM_NAME_LENGTH:
+		var char_index := rng.randi_range(0, RANDOM_NAME_ALPHABET.length() - 1)
+		result += RANDOM_NAME_ALPHABET[char_index]
+
+	return _sanitize_name(result)
+
 func _is_local_player(player_id: String, player: Player) -> bool:
 	if player_id == local_player_id:
 		return true
@@ -581,12 +515,24 @@ func _is_local_player(player_id: String, player: Player) -> bool:
 	return str(player.sessionId) == local_session_id
 
 func _store_local_player_identity(player_id: String, player: Player) -> void:
+	var should_snap_camera := local_session_id.is_empty()
+
 	if local_player_id != player_id:
 		local_player_id = player_id
 		_save_profile_value(SETTINGS_PLAYER_ID_KEY, local_player_id)
 
 	local_session_id = str(player.sessionId)
 	local_position = Vector2(player.x, player.y)
+	current_player_name = _display_player_name(player)
+
+	if should_snap_camera:
+		world_view.set_camera_target(local_position, true)
+
+func _display_player_name_from_id(player_id: String) -> String:
+	var avatar = avatars.get(player_id)
+	if avatar != null and avatar.has_method("get_display_name"):
+		return str(avatar.get_display_name())
+	return current_player_name
 
 func _is_expired_reconnect_error(error_text: String) -> bool:
 	var lowered := error_text.to_lower()
@@ -662,32 +608,44 @@ func _smooth_avatar_positions(delta: float) -> void:
 	if avatars.is_empty():
 		return
 
-	var transition_speed := WorldGrid.CELL_SIZE / CELL_TRANSITION_DURATION
+	var transition_speed := WorldConfig.cell_size() / CELL_TRANSITION_DURATION
 
 	for player_id in avatars.keys():
-		var avatar: Control = avatars.get(player_id)
+		var avatar: Node2D = avatars.get(player_id)
 		if avatar == null or not avatar_target_positions.has(player_id):
 			continue
 
 		var target_position: Vector2 = avatar_target_positions[player_id]
+		var is_moving := avatar.position.distance_to(target_position) > 1.0
 		avatar.position = avatar.position.move_toward(target_position, transition_speed * delta)
 
 		if avatar.position.distance_to(target_position) <= 1.0:
 			avatar.position = target_position
+			is_moving = false
+
+		if avatar.has_method("set_moving"):
+			avatar.set_moving(is_moving)
 
 func _predict_local_grid_move(direction: Vector2) -> void:
 	if local_player_id.is_empty() or not avatars.has(local_player_id):
 		return
 
-	var predicted_position := local_position + (direction * WorldGrid.CELL_SIZE)
-	predicted_position.x = clampf(predicted_position.x, WorldGrid.WORLD_MIN_X, WorldGrid.WORLD_MAX_X)
-	predicted_position.y = clampf(predicted_position.y, WorldGrid.WORLD_MIN_Y, WorldGrid.WORLD_MAX_Y)
-
-	if predicted_position == local_position:
+	var predicted_position := local_position + (direction * WorldConfig.cell_size())
+	if not WorldConfig.is_walkable_position(predicted_position):
 		return
 
 	local_position = predicted_position
 	_set_avatar_target(local_player_id, predicted_position)
+
+func _sync_camera_to_local_avatar() -> void:
+	if local_player_id.is_empty():
+		return
+
+	var avatar := avatars.get(local_player_id) as Node2D
+	if avatar == null:
+		return
+
+	world_view.set_camera_target(avatar.global_position)
 
 func _get_players_map(state):
 	if state == null:
@@ -698,5 +656,21 @@ func _get_players_map(state):
 
 	return null
 
-func _world_to_screen(world_position: Vector2) -> Vector2:
-	return (world_layer.size * 0.5) + world_position
+func _queue_auto_connect_retry() -> void:
+	if auto_connect_retry_scheduled:
+		return
+
+	auto_connect_retry_scheduled = true
+	call_deferred("_run_auto_connect_retry")
+
+func _run_auto_connect_retry() -> void:
+	await get_tree().create_timer(AUTO_CONNECT_RETRY_SECONDS).timeout
+	auto_connect_retry_scheduled = false
+
+	if is_connecting or (room != null and room.has_joined()):
+		return
+
+	if _has_reconnection_token():
+		await _reconnect_to_world(true)
+	else:
+		await _connect_to_world()

@@ -1,10 +1,9 @@
-[gd_scene format=3 uid="uid://7r86is875t7k"]
+[gd_scene format=3 uid="uid://61fnqxvjutug"]
 
 [ext_resource type="Script" uid="uid://bk7j2umdlj02g" path="res://scripts/main.gd" id="1_main"]
-[ext_resource type="PackedScene" path="res://world_view.tscn" id="2_world_view"]
-[ext_resource type="PackedScene" path="res://start_screen.tscn" id="3_start_screen"]
+[ext_resource type="PackedScene" uid="uid://15rx66h2bq5e" path="res://world_view.tscn" id="2_world_view"]
 
-[node name="Main" type="Control" unique_id=754000013]
+[node name="Main" type="Control" unique_id=1359710790]
 layout_mode = 3
 anchors_preset = 15
 anchor_right = 1.0
@@ -13,8 +12,6 @@ grow_horizontal = 2
 grow_vertical = 2
 script = ExtResource("1_main")
 
-[node name="WorldView" parent="." unique_id=443388586 instance=ExtResource("2_world_view")]
-layout_mode = 1
+[node name="WorldView" parent="." unique_id=1976402734 instance=ExtResource("2_world_view")]
 
-[node name="StartScreen" parent="." unique_id=290598282 instance=ExtResource("3_start_screen")]
-layout_mode = 1
+[editable path="WorldView"]

@@ -1,28 +1,29 @@
-class_name CatAvatar
-extends Control
+@tool
+class_name PlayerAvatar
+extends Node2D
 
-const AVATAR_SIZE := Vector2(96, 76)
-const LOCAL_BODY_COLOR := Color(0.94902, 0.737255, 0.321569, 1)
-const LOCAL_ACCENT_COLOR := Color(0.854902, 0.443137, 0.176471, 1)
-const REMOTE_BODY_COLOR := Color(0.462745, 0.701961, 0.94902, 1)
-const REMOTE_ACCENT_COLOR := Color(0.215686, 0.415686, 0.701961, 1)
+@export var idle_texture: Texture2D
+@export var walk_texture: Texture2D
+@export var editor_preview_only := false
+@export var editor_preview_name := "Player"
+@export var editor_preview_as_local := true
+@export var editor_preview_walking := false
 
 var _player_name := "Cat"
 var _is_local := false
+var _is_moving := false
 
-var _body: ColorRect
-var _ear_left: ColorRect
-var _ear_right: ColorRect
-var _name_label: Label
-var _tag_label: Label
-
-func _init() -> void:
-	mouse_filter = Control.MOUSE_FILTER_IGNORE
-	size = AVATAR_SIZE
-	custom_minimum_size = AVATAR_SIZE
+@onready var _character_root: Node2D = $CharacterRoot
+@onready var _sprite: Sprite2D = $CharacterRoot/Sprite2D
+@onready var _name_label: Label = $NameLabel
+@onready var _tag_label: Label = $TagLabel
 
 func _ready() -> void:
-	_build_visual()
+	if editor_preview_only and not Engine.is_editor_hint():
+		queue_free()
+		return
+
+	set_process(Engine.is_editor_hint())
 	_apply_visuals()
 
 func configure(player_name: String, is_local_player: bool) -> void:
@@ -32,65 +33,39 @@ func configure(player_name: String, is_local_player: bool) -> void:
 	if is_inside_tree():
 		_apply_visuals()
 
-func _build_visual() -> void:
-	if _body != null:
+func set_moving(is_moving: bool) -> void:
+	if _is_moving == is_moving:
 		return
 
-	var shadow = ColorRect.new()
-	shadow.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	shadow.position = Vector2(28, 50)
-	shadow.size = Vector2(40, 8)
-	shadow.color = Color(0, 0, 0, 0.18)
-	add_child(shadow)
+	_is_moving = is_moving
+	if is_inside_tree():
+		_apply_visuals()
 
-	_ear_left = ColorRect.new()
-	_ear_left.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_ear_left.position = Vector2(24, 22)
-	_ear_left.size = Vector2(12, 16)
-	add_child(_ear_left)
+func get_display_name() -> String:
+	return _player_name
 
-	_ear_right = ColorRect.new()
-	_ear_right.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_ear_right.position = Vector2(60, 22)
-	_ear_right.size = Vector2(12, 16)
-	add_child(_ear_right)
-
-	_body = ColorRect.new()
-	_body.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_body.position = Vector2(24, 34)
-	_body.size = Vector2(48, 24)
-	add_child(_body)
-
-	_tag_label = Label.new()
-	_tag_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_tag_label.position = Vector2(0, 0)
-	_tag_label.size = Vector2(AVATAR_SIZE.x, 18)
-	_tag_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_tag_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	_tag_label.add_theme_font_size_override("font_size", 11)
-	add_child(_tag_label)
-
-	_name_label = Label.new()
-	_name_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_name_label.position = Vector2(0, 58)
-	_name_label.size = Vector2(AVATAR_SIZE.x, 18)
-	_name_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_name_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	add_child(_name_label)
+func _process(_delta: float) -> void:
+	if Engine.is_editor_hint():
+		_apply_visuals()
 
 func _apply_visuals() -> void:
-	if _body == null:
-		return
+	var display_name := _player_name
+	var display_is_local := _is_local
+	var display_is_moving := _is_moving
 
-	var body_color = REMOTE_BODY_COLOR
-	var accent_color = REMOTE_ACCENT_COLOR
+	if Engine.is_editor_hint() and editor_preview_only:
+		display_name = editor_preview_name
+		display_is_local = editor_preview_as_local
+		display_is_moving = editor_preview_walking
 
-	if _is_local:
-		body_color = LOCAL_BODY_COLOR
-		accent_color = LOCAL_ACCENT_COLOR
+	var active_texture := idle_texture
+	if display_is_moving and walk_texture != null:
+		active_texture = walk_texture
 
-	_body.color = body_color
-	_ear_left.color = accent_color
-	_ear_right.color = accent_color
-	_name_label.text = _player_name
-	_tag_label.text = "YOU" if _is_local else "CAT"
+	_character_root.modulate = Color.WHITE
+	_sprite.modulate = Color.WHITE
+	if active_texture != null:
+		_sprite.texture = active_texture
+
+	_name_label.text = display_name
+	_tag_label.text = "YOU" if display_is_local else ""

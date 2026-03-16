@@ -1,0 +1,20 @@
+Godot Engine v4.6.1.stable.official.14d19694e - https://godotengine.org
+
+ERROR: Failed to read the root certificate store.
+   at: get_system_ca_certificates (platform/windows/os_windows.cpp:2570)
+ERROR: Cannot create tile. The tile is outside the texture or tiles are already present in the space the tile would cover.
+   at: create_tile (scene/resources/2d/tile_set.cpp:4985)
+ERROR: The TileSetAtlasSource atlas has no tile at (0, 0).
+   at: has_alternative_tile (scene/resources/2d/tile_set.cpp:5437)
+ERROR: TileSetAtlasSource has no tile at (0, 0).
+   at: create_alternative_tile (scene/resources/2d/tile_set.cpp:5385)
+[network] offline | Auto-connect is starting.
+ERROR: The Image width specified (0 pixels) must be greater than 0 pixels.
+   at: initialize_data (core/io/image.cpp:2389)
+ERROR: Invalid image: image is empty
+   at: create_from_image (scene/resources/image_texture.cpp:58)
+[network] connecting | Connecting to ws://localhost:2567 as govbirdl ...
+WARNING: ObjectDB instances leaked at exit (run with --verbose for details).
+   at: cleanup (core/object/object.cpp:2641)
+ERROR: 2 resources still in use at exit (run with --verbose for details).
+   at: clear (core/io/resource.cpp:810)

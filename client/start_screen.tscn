@@ -1,6 +1,6 @@
 [gd_scene format=3 uid="uid://c8l3i4uxx0d0u"]
 
-[ext_resource type="Script" path="res://scripts/start_screen.gd" id="1_start_screen"]
+[ext_resource type="Script" uid="uid://b8p2ye5jtet41" path="res://scripts/start_screen.gd" id="1_start_screen"]
 
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_login"]
 bg_color = Color(0.164706, 0.192157, 0.219608, 0.96)
@@ -16,7 +16,7 @@ corner_radius_bottom_left = 20
 shadow_color = Color(0, 0, 0, 0.18)
 shadow_size = 10
 
-[node name="StartScreen" type="Control"]
+[node name="StartScreen" type="Control" unique_id=1138238066]
 layout_mode = 3
 anchors_preset = 15
 anchor_right = 1.0
@@ -25,16 +25,16 @@ grow_horizontal = 2
 grow_vertical = 2
 script = ExtResource("1_start_screen")
 
-[node name="OverlayShade" type="ColorRect" parent="."]
+[node name="OverlayShade" type="ColorRect" parent="." unique_id=107042349]
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
-color = Color(0.0745098, 0.0901961, 0.105882, 0.7)
+color = Color(0.12941177, 0.15294118, 0.17254902, 0.7529412)
 
-[node name="LoginCenter" type="CenterContainer" parent="."]
+[node name="LoginCenter" type="CenterContainer" parent="." unique_id=1382660217]
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
@@ -42,62 +42,62 @@ anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
 
-[node name="LoginPanel" type="PanelContainer" parent="LoginCenter"]
+[node name="LoginPanel" type="PanelContainer" parent="LoginCenter" unique_id=1244521528]
 custom_minimum_size = Vector2(620, 0)
 layout_mode = 2
 theme_override_styles/panel = SubResource("StyleBoxFlat_login")
 
-[node name="LoginMargin" type="MarginContainer" parent="LoginCenter/LoginPanel"]
+[node name="LoginMargin" type="MarginContainer" parent="LoginCenter/LoginPanel" unique_id=656141558]
 layout_mode = 2
 theme_override_constants/margin_left = 28
 theme_override_constants/margin_top = 24
 theme_override_constants/margin_right = 28
 theme_override_constants/margin_bottom = 24
 
-[node name="LoginVBox" type="VBoxContainer" parent="LoginCenter/LoginPanel/LoginMargin"]
+[node name="LoginVBox" type="VBoxContainer" parent="LoginCenter/LoginPanel/LoginMargin" unique_id=462033113]
 layout_mode = 2
 theme_override_constants/separation = 12
 
-[node name="TitleLabel" type="Label" parent="LoginCenter/LoginPanel/LoginMargin/LoginVBox"]
+[node name="TitleLabel" type="Label" parent="LoginCenter/LoginPanel/LoginMargin/LoginVBox" unique_id=1780390939]
 layout_mode = 2
 theme_override_font_sizes/font_size = 30
 text = "Enter Catlaw"
 
-[node name="IntroLabel" type="Label" parent="LoginCenter/LoginPanel/LoginMargin/LoginVBox"]
+[node name="IntroLabel" type="Label" parent="LoginCenter/LoginPanel/LoginMargin/LoginVBox" unique_id=1299657793]
 modulate = Color(0.843137, 0.890196, 0.917647, 0.88)
 layout_mode = 2
 text = "Choose a name and enter the world."
 
-[node name="JoinRow" type="HBoxContainer" parent="LoginCenter/LoginPanel/LoginMargin/LoginVBox"]
+[node name="JoinRow" type="HBoxContainer" parent="LoginCenter/LoginPanel/LoginMargin/LoginVBox" unique_id=1359116155]
 layout_mode = 2
 theme_override_constants/separation = 8
 
-[node name="NameLabel" type="Label" parent="LoginCenter/LoginPanel/LoginMargin/LoginVBox/JoinRow"]
+[node name="NameLabel" type="Label" parent="LoginCenter/LoginPanel/LoginMargin/LoginVBox/JoinRow" unique_id=1984094835]
 layout_mode = 2
 text = "Name"
 
-[node name="NameInput" type="LineEdit" parent="LoginCenter/LoginPanel/LoginMargin/LoginVBox/JoinRow"]
+[node name="NameInput" type="LineEdit" parent="LoginCenter/LoginPanel/LoginMargin/LoginVBox/JoinRow" unique_id=882024983]
 custom_minimum_size = Vector2(260, 0)
 layout_mode = 2
 size_flags_horizontal = 3
 text = "name"
 placeholder_text = "name"
 
-[node name="EnterWorldButton" type="Button" parent="LoginCenter/LoginPanel/LoginMargin/LoginVBox/JoinRow"]
+[node name="EnterWorldButton" type="Button" parent="LoginCenter/LoginPanel/LoginMargin/LoginVBox/JoinRow" unique_id=1468571225]
 custom_minimum_size = Vector2(170, 0)
 layout_mode = 2
 text = "Enter World"
 
-[node name="StatusLabel" type="Label" parent="LoginCenter/LoginPanel/LoginMargin/LoginVBox"]
+[node name="StatusLabel" type="Label" parent="LoginCenter/LoginPanel/LoginMargin/LoginVBox" unique_id=1057953844]
 layout_mode = 2
 text = "Status: offline"
 
-[node name="HelpLabel" type="Label" parent="LoginCenter/LoginPanel/LoginMargin/LoginVBox"]
+[node name="HelpLabel" type="Label" parent="LoginCenter/LoginPanel/LoginMargin/LoginVBox" unique_id=2021231168]
 modulate = Color(0.843137, 0.890196, 0.917647, 0.82)
 layout_mode = 2
 text = "Run the server, then click Enter World. Move one cell with arrow keys."
 
-[node name="DebugLabel" type="Label" parent="LoginCenter/LoginPanel/LoginMargin/LoginVBox"]
+[node name="DebugLabel" type="Label" parent="LoginCenter/LoginPanel/LoginMargin/LoginVBox" unique_id=56888246]
 visible = false
 modulate = Color(0.658824, 0.839216, 0.929412, 0.8)
 layout_mode = 2

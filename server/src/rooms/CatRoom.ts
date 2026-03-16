@@ -1,6 +1,7 @@
 import { Room, type Client } from "colyseus";
 import { CloseCode } from "@colyseus/shared-types";
 import { Player, WorldState } from "./schema/WorldState.js";
+import { isWithinWorldBounds, snapWorldPosition, worldConfig } from "../config/worldConfig.js";
 import { playerIdentityStore } from "../persistence/PlayerIdentityStore.js";
 
 type JoinOptions = { name?: string; playerId?: string };
@@ -11,11 +12,6 @@ type GridStep = {
   y: number;
 };
 
-const GRID_CELL_SIZE = 64;
-const WORLD_MIN_X = -512;
-const WORLD_MAX_X = 512;
-const WORLD_MIN_Y = -256;
-const WORLD_MAX_Y = 256;
 const GRID_STEP_COOLDOWN_MS = 160;
 const RECONNECT_WINDOW_SECONDS = 20;
 
@@ -144,8 +140,8 @@ export class CatRoom extends Room<{ state: WorldState }> {
     }
 
     const snappedPosition = snapWorldPosition(player.x, player.y);
-    const nextX = snappedPosition.x + step.x * GRID_CELL_SIZE;
-    const nextY = snappedPosition.y + step.y * GRID_CELL_SIZE;
+    const nextX = snappedPosition.x + step.x * worldConfig.gridCellSize;
+    const nextY = snappedPosition.y + step.y * worldConfig.gridCellSize;
 
     if (!isWithinWorldBounds(nextX, nextY)) {
       return;
@@ -156,10 +152,6 @@ export class CatRoom extends Room<{ state: WorldState }> {
     this.lastMoveAt.set(playerId, now);
     playerIdentityStore.savePlayerSnapshot(toPlayerSnapshot(player));
   }
-}
-
-function clamp(value: number, min: number, max: number) {
-  return Math.max(min, Math.min(max, value));
 }
 
 function isFiniteNumber(value: unknown): value is number {
@@ -205,21 +197,6 @@ function toAxisStep(value: number) {
   }
 
   return 0;
-}
-
-function snapToGrid(value: number, min: number, max: number) {
-  return clamp(Math.round(value / GRID_CELL_SIZE) * GRID_CELL_SIZE, min, max);
-}
-
-function snapWorldPosition(x: number, y: number) {
-  return {
-    x: snapToGrid(x, WORLD_MIN_X, WORLD_MAX_X),
-    y: snapToGrid(y, WORLD_MIN_Y, WORLD_MAX_Y),
-  };
-}
-
-function isWithinWorldBounds(x: number, y: number) {
-  return x >= WORLD_MIN_X && x <= WORLD_MAX_X && y >= WORLD_MIN_Y && y <= WORLD_MAX_Y;
 }
 
 function normalizePlayerId(value: unknown) {
