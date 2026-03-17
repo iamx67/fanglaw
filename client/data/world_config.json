@@ -1,6 +1,6 @@
 {
-  "cellSize": 64,
-  "worldHalfWidthCells": 667,
-  "worldHalfHeightCells": 667,
-  "wallThickness": 256
+	"cellSize": 64.0,
+	"wallThickness": 256.0,
+	"worldHalfHeightCells": 667.0,
+	"worldHalfWidthCells": 667.0
 }

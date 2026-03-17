@@ -9,6 +9,16 @@ export class Player extends Schema {
   @type("boolean") connected: boolean = true;
 }
 
+export class Prey extends Schema {
+  @type("string") preyId: string = "";
+  @type("string") kind: string = "mouse";
+  @type("string") state: string = "alive";
+  @type("string") searchZoneId: string = "";
+  @type("number") x: number = 0;
+  @type("number") y: number = 0;
+}
+
 export class WorldState extends Schema {
   @type({ map: Player }) players = new MapSchema<Player>();
+  @type({ map: Prey }) prey = new MapSchema<Prey>();
 }

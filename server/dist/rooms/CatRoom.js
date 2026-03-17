@@ -1,12 +1,9 @@
 import { Room } from "colyseus";
 import { CloseCode } from "@colyseus/shared-types";
 import { Player, WorldState } from "./schema/WorldState.js";
+import { isWithinWorldBounds, snapWorldPosition, worldConfig } from "../config/worldConfig.js";
+import { AuthStoreError, authStore } from "../persistence/AuthStore.js";
 import { playerIdentityStore } from "../persistence/PlayerIdentityStore.js";
-const GRID_CELL_SIZE = 64;
-const WORLD_MIN_X = -512;
-const WORLD_MAX_X = 512;
-const WORLD_MIN_Y = -256;
-const WORLD_MAX_Y = 256;
 const GRID_STEP_COOLDOWN_MS = 160;
 const RECONNECT_WINDOW_SECONDS = 20;
 export class CatRoom extends Room {
@@ -16,6 +13,21 @@ export class CatRoom extends Room {
         this.autoDispose = false;
         this.sessionToPlayerId = new Map();
         this.lastMoveAt = new Map();
+    }
+    async onAuth(_client, options) {
+        const sessionToken = normalizeSessionToken(options?.sessionToken);
+        if (!sessionToken) {
+            throw new Error("Authentication required");
+        }
+        try {
+            return await authStore.getAuthBySessionToken(sessionToken);
+        }
+        catch (error) {
+            if (error instanceof AuthStoreError) {
+                throw new Error("Authentication failed");
+            }
+            throw error;
+        }
     }
     onCreate() {
         this.setState(new WorldState());
@@ -44,18 +56,22 @@ export class CatRoom extends Room {
         });
         console.log("CatRoom created");
     }
-    onJoin(client, options) {
-        const playerId = normalizePlayerId(options?.playerId);
+    onJoin(client, _options, auth) {
+        const authData = (client.auth ?? auth);
+        if (!authData) {
+            throw new Error("Authentication required");
+        }
+        const playerId = authData.characterId;
         const existingPlayer = this.state.players.get(playerId);
         if (existingPlayer) {
             throw new Error("Player is already connected or reconnecting");
         }
-        const profile = playerIdentityStore.getOrCreateGuestProfile(playerId, getSuggestedName(options?.name));
+        const profile = playerIdentityStore.getOrCreateProfile(playerId, authData.characterName, "account");
         const spawnPosition = snapWorldPosition(profile.x, profile.y);
         const player = new Player();
-        player.playerId = profile.playerId;
+        player.playerId = authData.characterId;
         player.sessionId = client.sessionId;
-        player.name = profile.name;
+        player.name = authData.characterName;
         player.x = spawnPosition.x;
         player.y = spawnPosition.y;
         player.connected = true;
@@ -63,7 +79,8 @@ export class CatRoom extends Room {
         this.sessionToPlayerId.set(client.sessionId, playerId);
         this.lastMoveAt.set(playerId, 0);
         void playerIdentityStore.flush();
-        console.log(`join ${player.name} (${playerId} / ${client.sessionId})`);
+        void authStore.flush();
+        console.log(`join ${player.name} (${playerId} / ${client.sessionId}) account=${authData.accountId}`);
     }
     async onLeave(client, code) {
         const playerId = this.sessionToPlayerId.get(client.sessionId);
@@ -108,8 +125,8 @@ export class CatRoom extends Room {
             return;
         }
         const snappedPosition = snapWorldPosition(player.x, player.y);
-        const nextX = snappedPosition.x + step.x * GRID_CELL_SIZE;
-        const nextY = snappedPosition.y + step.y * GRID_CELL_SIZE;
+        const nextX = snappedPosition.x + step.x * worldConfig.gridCellSize;
+        const nextY = snappedPosition.y + step.y * worldConfig.gridCellSize;
         if (!isWithinWorldBounds(nextX, nextY)) {
             return;
         }
@@ -118,9 +135,6 @@ export class CatRoom extends Room {
         this.lastMoveAt.set(playerId, now);
         playerIdentityStore.savePlayerSnapshot(toPlayerSnapshot(player));
     }
-}
-function clamp(value, min, max) {
-    return Math.max(min, Math.min(max, value));
 }
 function isFiniteNumber(value) {
     return typeof value === "number" && Number.isFinite(value);
@@ -134,9 +148,6 @@ function parseGridStep(value) {
     const stepX = toAxisStep(rawX);
     const stepY = toAxisStep(rawY);
     if (stepX === 0 && stepY === 0) {
-        return null;
-    }
-    if (stepX !== 0 && stepY !== 0) {
         return null;
     }
     return {
@@ -156,36 +167,11 @@ function toAxisStep(value) {
     }
     return 0;
 }
-function snapToGrid(value, min, max) {
-    return clamp(Math.round(value / GRID_CELL_SIZE) * GRID_CELL_SIZE, min, max);
-}
-function snapWorldPosition(x, y) {
-    return {
-        x: snapToGrid(x, WORLD_MIN_X, WORLD_MAX_X),
-        y: snapToGrid(y, WORLD_MIN_Y, WORLD_MAX_Y),
-    };
-}
-function isWithinWorldBounds(x, y) {
-    return x >= WORLD_MIN_X && x <= WORLD_MAX_X && y >= WORLD_MIN_Y && y <= WORLD_MAX_Y;
-}
-function normalizePlayerId(value) {
-    const fallback = `guest-${Math.random().toString(36).slice(2, 10)}`;
+function normalizeSessionToken(value) {
     if (typeof value !== "string") {
-        return fallback;
-    }
-    const sanitized = value.trim().toLowerCase().replace(/[^a-z0-9_-]/g, "").slice(0, 32);
-    return sanitized || fallback;
-}
-function getSuggestedName(value) {
-    if (typeof value !== "string" || value.trim().length === 0) {
         return "";
     }
-    return normalizeName(value);
-}
-function normalizeName(value) {
-    const fallback = "Cat";
-    const raw = typeof value === "string" ? value.trim() : fallback;
-    return (raw || fallback).slice(0, 16);
+    return value.trim();
 }
 function toPlayerSnapshot(player) {
     return {

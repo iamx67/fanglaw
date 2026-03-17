@@ -1,0 +1,13 @@
+[gd_scene format=4]
+
+[ext_resource type="Script" path="res://scripts/prey_search_zone.gd" id="1_prey_search_zone"]
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_default"]
+resource_local_to_scene = true
+size = Vector2(256, 256)
+
+[node name="PreySearchZone" type="Area2D"]
+script = ExtResource("1_prey_search_zone")
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="."]
+shape = SubResource("RectangleShape2D_default")

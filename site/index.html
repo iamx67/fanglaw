@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Fanglaw Registration Prototype</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <main class="page">
+    <section class="hero">
+      <p class="eyebrow">Fanglaw Prototype</p>
+      <h1>Регистрация</h1>
+      <p class="lead">
+        Пока здесь только первый шаг: регистрация аккаунта и выбор имени персонажа.
+        Создание персонажа и редактор окраса будут отдельным этапом после регистрации.
+      </p>
+    </section>
+
+    <section class="panel registration-panel">
+      <h2>Создать аккаунт</h2>
+
+      <form id="registration-form" class="stack">
+        <label class="field">
+          <span>Имя персонажа</span>
+          <input id="character-name" name="characterName" type="text" maxlength="16" placeholder="Имя кота" required>
+        </label>
+
+        <label class="field">
+          <span>Email</span>
+          <input id="email" name="email" type="email" placeholder="cat@fanglaw.ru" autocomplete="email" required>
+        </label>
+
+        <label class="field">
+          <span>Пароль</span>
+          <input id="password" name="password" type="password" minlength="6" placeholder="Минимум 6 символов" autocomplete="new-password" required>
+        </label>
+
+        <label class="field">
+          <span>Повторите пароль</span>
+          <input id="password-confirm" name="passwordConfirm" type="password" minlength="6" placeholder="Повторите пароль" autocomplete="new-password" required>
+        </label>
+
+        <button class="button primary" type="submit">Зарегистрироваться</button>
+      </form>
+
+      <p id="form-status" class="status" aria-live="polite"></p>
+
+      <div class="saved-box">
+        <h3>Локально сохранённые данные</h3>
+        <pre id="saved-data">Пока ничего не сохранено.</pre>
+      </div>
+    </section>
+  </main>
+
+  <script src="./app.js"></script>
+</body>
+</html>

@@ -1,0 +1,11 @@
+Godot Engine v4.6.1.stable.official.14d19694e - https://godotengine.org
+
+ERROR: Failed to read the root certificate store.
+   at: get_system_ca_certificates (platform/windows/os_windows.cpp:2570)
+SCRIPT ERROR: Parse Error: Cannot find member "with_alpha" in base "Color".
+   at: GDScript::reload (res://scripts/prey_avatar.gd:36)
+SCRIPT ERROR: Parse Error: Function "with_alpha()" not found in base Color.
+   at: GDScript::reload (res://scripts/prey_avatar.gd:36)
+ERROR: Failed to load script "res://scripts/prey_avatar.gd" with error "Parse error".
+   at: load (modules/gdscript/gdscript.cpp:2907)
+[network] offline | Authentication is required.

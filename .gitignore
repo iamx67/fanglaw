@@ -5,4 +5,6 @@ server/*.stdout.log
 server/*.stderr.log
 server/.env
 server/data/players.json
+server/data/auth.json
+server/.local-postgres/
 client/.godot/

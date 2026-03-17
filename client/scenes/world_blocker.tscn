@@ -1,0 +1,17 @@
+[gd_scene format=3 uid="uid://co5c1sh445lo1"]
+
+[ext_resource type="Script" uid="uid://dit8vs5y83a0j" path="res://scripts/world_blocker.gd" id="1_world_blocker"]
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_default"]
+resource_local_to_scene = true
+size = Vector2(32, 32)
+
+[node name="WorldBlocker" type="Area2D" unique_id=1778780521]
+collision_layer = 0
+collision_mask = 0
+monitoring = false
+monitorable = false
+script = ExtResource("1_world_blocker")
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="." unique_id=1059680233]
+shape = SubResource("RectangleShape2D_default")

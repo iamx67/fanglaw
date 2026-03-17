@@ -1,0 +1,17 @@
+{
+	"zones": [
+		{
+			"difficulty": 0.0,
+			"height": 180.0,
+			"locationId": "",
+			"name": "PreySearchZone",
+			"preyKind": "mouse",
+			"requiredSkill": "hunting",
+			"searchZoneId": "search_zone_01",
+			"spawnTag": "bushes",
+			"width": 256.0,
+			"x": 41657.0,
+			"y": -160.0
+		}
+	]
+}

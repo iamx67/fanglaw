@@ -1,7 +1,9 @@
-[gd_scene format=3 uid="uid://61fnqxvjutug"]
+[gd_scene format=4 uid="uid://61fnqxvjutug"]
 
 [ext_resource type="Script" uid="uid://bk7j2umdlj02g" path="res://scripts/main.gd" id="1_main"]
 [ext_resource type="PackedScene" uid="uid://15rx66h2bq5e" path="res://world_view.tscn" id="2_world_view"]
+[ext_resource type="PackedScene" uid="uid://co5c1sh445lo1" path="res://scenes/world_blocker.tscn" id="3_h2yge"]
+[ext_resource type="PackedScene" path="res://scenes/prey_search_zone.tscn" id="4_1bvp3"]
 
 [node name="Main" type="Control" unique_id=1359710790]
 layout_mode = 3
@@ -13,5 +15,135 @@ grow_vertical = 2
 script = ExtResource("1_main")
 
 [node name="WorldView" parent="." unique_id=1976402734 instance=ExtResource("2_world_view")]
+
+[node name="Blockers" parent="WorldView" index="5" unique_id=273289115]
+position = Vector2(-136, 61)
+
+[node name="WorldBlocker" parent="WorldView/Blockers" index="0" unique_id=152193576 instance=ExtResource("3_h2yge")]
+position = Vector2(41790, -131)
+blocker_size = Vector2(300, 32)
+
+[node name="PreySearchZone" parent="WorldView/PreySearchZones" parent_id_path=PackedInt32Array(1976402734, 1280456051) index="0" unique_id=1719463368 instance=ExtResource("4_1bvp3")]
+position = Vector2(41657, -160)
+collision_layer = 0
+collision_mask = 0
+monitoring = false
+monitorable = false
+spawn_tag = "bushes "
+zone_size = Vector2(256, 180)
+
+[node name="bushes" parent="WorldView" index="14" unique_id=1469407261]
+position = Vector2(5, -33)
+tile_map_data = PackedByteArray("AAD///3/AAAAAAAAAAADAAAAAAAAAAAAAAD7//3/AAAAAAAAAAD8/wQAAAAAAAAAAAAGAAYAAAAAAAAAAAAFAPn/AAAAAAAAAAD5//n/AAAAAAAAAABqAPr/AAAAAAAAAABqAAQAAAAAAAAAAABpAP//AAAAAAAAAAA=")
+
+[node name="ActionLayer" type="CanvasLayer" parent="." unique_id=109087741]
+layer = 5
+
+[node name="ActionOverlay" type="Control" parent="ActionLayer" unique_id=1710024084]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="BottomCenter" type="CenterContainer" parent="ActionLayer/ActionOverlay" unique_id=1662231881]
+layout_mode = 1
+anchors_preset = 12
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_top = -112.0
+offset_bottom = -28.0
+grow_horizontal = 2
+grow_vertical = 0
+
+[node name="SearchPreyButton" type="Button" parent="ActionLayer/ActionOverlay/BottomCenter" unique_id=1971147885]
+custom_minimum_size = Vector2(220, 48)
+layout_mode = 2
+text = "Искать дичь"
+
+[node name="AuthLayer" type="CanvasLayer" parent="." unique_id=1961582386]
+layer = 10
+
+[node name="AuthOverlay" type="Control" parent="AuthLayer" unique_id=621460714]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="Scrim" type="ColorRect" parent="AuthLayer/AuthOverlay" unique_id=1365510396]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0.0509804, 0.0392157, 0.027451, 0.82)
+
+[node name="Center" type="CenterContainer" parent="AuthLayer/AuthOverlay" unique_id=1171820919]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="Panel" type="PanelContainer" parent="AuthLayer/AuthOverlay/Center" unique_id=1442336910]
+custom_minimum_size = Vector2(420, 0)
+layout_mode = 2
+
+[node name="Margin" type="MarginContainer" parent="AuthLayer/AuthOverlay/Center/Panel" unique_id=125786213]
+layout_mode = 2
+theme_override_constants/margin_left = 24
+theme_override_constants/margin_top = 24
+theme_override_constants/margin_right = 24
+theme_override_constants/margin_bottom = 24
+
+[node name="VBox" type="VBoxContainer" parent="AuthLayer/AuthOverlay/Center/Panel/Margin" unique_id=867657159]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="Title" type="Label" parent="AuthLayer/AuthOverlay/Center/Panel/Margin/VBox" unique_id=783556679]
+layout_mode = 2
+theme_override_font_sizes/font_size = 26
+text = "Вход"
+
+[node name="Description" type="Label" parent="AuthLayer/AuthOverlay/Center/Panel/Margin/VBox" unique_id=1128463453]
+layout_mode = 2
+text = "Если аккаунта ещё нет, зарегистрируйтесь на сайте."
+autowrap_mode = 3
+
+[node name="EmailInput" type="LineEdit" parent="AuthLayer/AuthOverlay/Center/Panel/Margin/VBox" unique_id=1295603773]
+layout_mode = 2
+placeholder_text = "Email"
+
+[node name="PasswordInput" type="LineEdit" parent="AuthLayer/AuthOverlay/Center/Panel/Margin/VBox" unique_id=535380256]
+layout_mode = 2
+placeholder_text = "Пароль"
+secret = true
+
+[node name="Buttons" type="HBoxContainer" parent="AuthLayer/AuthOverlay/Center/Panel/Margin/VBox" unique_id=1014735922]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="LoginButton" type="Button" parent="AuthLayer/AuthOverlay/Center/Panel/Margin/VBox/Buttons" unique_id=1795329506]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Войти"
+
+[node name="OpenSiteButton" type="Button" parent="AuthLayer/AuthOverlay/Center/Panel/Margin/VBox/Buttons" unique_id=123220845]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Регистрация"
+
+[node name="StatusLabel" type="Label" parent="AuthLayer/AuthOverlay/Center/Panel/Margin/VBox" unique_id=2143899942]
+layout_mode = 2
+autowrap_mode = 3
+
+[node name="AuthRequest" type="HTTPRequest" parent="." unique_id=1582796896]
 
 [editable path="WorldView"]

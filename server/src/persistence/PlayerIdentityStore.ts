@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 
 export type PlayerIdentity = {
   playerId: string;
-  accountType: "guest";
+  accountType: "guest" | "account";
   name: string;
   x: number;
   y: number;
@@ -19,6 +19,18 @@ export type PlayerSnapshot = {
   y: number;
 };
 
+export interface PlayerIdentityStoreBackend {
+  load(): Promise<void>;
+  getOrCreateProfile(
+    playerId: string,
+    suggestedName?: string,
+    accountType?: PlayerIdentity["accountType"],
+  ): PlayerIdentity;
+  getOrCreateGuestProfile(playerId: string, suggestedName?: string): PlayerIdentity;
+  savePlayerSnapshot(snapshot: PlayerSnapshot): PlayerIdentity;
+  flush(): Promise<void>;
+}
+
 type StoredPlayersFile = {
   version: 1;
   players: Record<string, PlayerIdentity>;
@@ -26,7 +38,7 @@ type StoredPlayersFile = {
 
 const FLUSH_DEBOUNCE_MS = 750;
 
-export class PlayerIdentityStore {
+class FilePlayerIdentityStore implements PlayerIdentityStoreBackend {
   private readonly profiles = new Map<string, PlayerIdentity>();
   private loaded = false;
   private dirty = false;
@@ -54,7 +66,7 @@ export class PlayerIdentityStore {
 
           this.profiles.set(playerId, {
             playerId,
-            accountType: "guest",
+            accountType: normalizeStoredAccountType(profile.accountType),
             name: normalizeStoredName(profile.name),
             x: normalizeStoredNumber(profile.x),
             y: normalizeStoredNumber(profile.y),
@@ -72,13 +84,28 @@ export class PlayerIdentityStore {
     this.loaded = true;
   }
 
-  getOrCreateGuestProfile(playerId: string, suggestedName = "") {
+  getOrCreateProfile(
+    playerId: string,
+    suggestedName = "",
+    accountType: PlayerIdentity["accountType"] = "guest",
+  ) {
     const existing = this.profiles.get(playerId);
     const nextName = normalizeStoredName(suggestedName);
 
     if (existing) {
+      let changed = false;
+
+      if (existing.accountType !== accountType) {
+        existing.accountType = accountType;
+        changed = true;
+      }
+
       if (suggestedName && existing.name !== nextName) {
         existing.name = nextName;
+        changed = true;
+      }
+
+      if (changed) {
         this.touch(existing);
       }
 
@@ -88,7 +115,7 @@ export class PlayerIdentityStore {
     const now = Date.now();
     const profile: PlayerIdentity = {
       playerId,
-      accountType: "guest",
+      accountType,
       name: suggestedName ? nextName : "Cat",
       x: 0,
       y: 0,
@@ -102,12 +129,22 @@ export class PlayerIdentityStore {
     return profile;
   }
 
-  savePlayerSnapshot(snapshot: PlayerSnapshot) {
-    const profile = this.getOrCreateGuestProfile(snapshot.playerId, snapshot.name);
-    let changed = false;
+  getOrCreateGuestProfile(playerId: string, suggestedName = "") {
+    return this.getOrCreateProfile(playerId, suggestedName, "guest");
+  }
 
-    if (profile.name !== snapshot.name) {
-      profile.name = normalizeStoredName(snapshot.name);
+  savePlayerSnapshot(snapshot: PlayerSnapshot) {
+    const existing = this.profiles.get(snapshot.playerId);
+    const profile = this.getOrCreateProfile(
+      snapshot.playerId,
+      snapshot.name,
+      existing?.accountType ?? "guest",
+    );
+    let changed = false;
+    const nextName = normalizeStoredName(snapshot.name);
+
+    if (profile.name !== nextName) {
+      profile.name = nextName;
       changed = true;
     }
 
@@ -167,12 +204,91 @@ export class PlayerIdentityStore {
   }
 }
 
+class RuntimePlayerIdentityStore implements PlayerIdentityStoreBackend {
+  private backend: PlayerIdentityStoreBackend | null = null;
+  private loaded = false;
+
+  constructor(
+    private readonly filePath: string,
+    private readonly databaseUrl: string,
+    private readonly databaseSsl: boolean,
+    private readonly databaseRequired: boolean,
+  ) {}
+
+  async load() {
+    if (this.loaded) {
+      return;
+    }
+
+    if (this.databaseUrl) {
+      try {
+        const { PostgresPlayerIdentityStore } = await import("./PostgresPlayerIdentityStore.js");
+        this.backend = new PostgresPlayerIdentityStore({
+          databaseUrl: this.databaseUrl,
+          ssl: this.databaseSsl,
+        });
+        await this.backend.load();
+        this.loaded = true;
+        console.log(`[player-profiles] PostgreSQL backend is active (${maskDatabaseUrl(this.databaseUrl)})`);
+        return;
+      } catch (error) {
+        if (this.databaseRequired) {
+          throw error;
+        }
+
+        console.warn(
+          `[player-profiles] PostgreSQL is unavailable (${maskDatabaseUrl(this.databaseUrl)}). Falling back to file storage at ${this.filePath}.`,
+        );
+        console.warn(error);
+      }
+    }
+
+    this.backend = new FilePlayerIdentityStore(this.filePath);
+    await this.backend.load();
+    this.loaded = true;
+    if (this.databaseUrl) {
+      console.log(`[player-profiles] File fallback backend is active (${this.filePath})`);
+    } else {
+      console.log(`[player-profiles] File backend is active (${this.filePath})`);
+    }
+  }
+
+  getOrCreateProfile(
+    playerId: string,
+    suggestedName = "",
+    accountType: PlayerIdentity["accountType"] = "guest",
+  ) {
+    return this.requireBackend().getOrCreateProfile(playerId, suggestedName, accountType);
+  }
+
+  getOrCreateGuestProfile(playerId: string, suggestedName = "") {
+    return this.requireBackend().getOrCreateGuestProfile(playerId, suggestedName);
+  }
+
+  savePlayerSnapshot(snapshot: PlayerSnapshot) {
+    return this.requireBackend().savePlayerSnapshot(snapshot);
+  }
+
+  async flush() {
+    await this.requireBackend().flush();
+  }
+
+  private requireBackend() {
+    if (!this.backend) {
+      throw new Error("Player identity store is not loaded");
+    }
+
+    return this.backend;
+  }
+}
+
 function serializePlayersFile(players: Map<string, PlayerIdentity>): StoredPlayersFile {
   const serializedPlayers: Record<string, PlayerIdentity> = {};
 
   for (const [playerId, profile] of players.entries()) {
     serializedPlayers[playerId] = {
       ...profile,
+      accountType: normalizeStoredAccountType(profile.accountType),
       name: normalizeStoredName(profile.name),
       x: normalizeStoredNumber(profile.x),
       y: normalizeStoredNumber(profile.y),
@@ -187,7 +303,11 @@ function serializePlayersFile(players: Map<string, PlayerIdentity>): StoredPlaye
   };
 }
 
-function normalizeStoredName(value: unknown) {
+export function normalizeStoredAccountType(value: unknown): PlayerIdentity["accountType"] {
+  return value === "account" ? "account" : "guest";
+}
+
+export function normalizeStoredName(value: unknown) {
   if (typeof value !== "string") {
     return "Cat";
   }
@@ -196,11 +316,11 @@ function normalizeStoredName(value: unknown) {
   return sanitized || "Cat";
 }
 
-function normalizeStoredNumber(value: unknown) {
+export function normalizeStoredNumber(value: unknown) {
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
 
-function normalizeStoredTimestamp(value: unknown) {
+export function normalizeStoredTimestamp(value: unknown) {
   return typeof value === "number" && Number.isFinite(value) ? value : Date.now();
 }
 
@@ -209,5 +329,26 @@ function isMissingFileError(error: unknown): error is NodeJS.ErrnoException {
 }
 
 const PLAYER_DATA_FILE = fileURLToPath(new URL("../../data/players.json", import.meta.url));
+const DATABASE_URL = process.env.DATABASE_URL?.trim() ?? "";
+const DATABASE_SSL = (process.env.DATABASE_SSL?.trim().toLowerCase() ?? "") === "true";
+const DATABASE_REQUIRED = (process.env.DATABASE_REQUIRED?.trim().toLowerCase() ?? "") === "true";
 
-export const playerIdentityStore = new PlayerIdentityStore(PLAYER_DATA_FILE);
+export const playerIdentityStore = new RuntimePlayerIdentityStore(
+  PLAYER_DATA_FILE,
+  DATABASE_URL,
+  DATABASE_SSL,
+  DATABASE_REQUIRED,
+);
+
+function maskDatabaseUrl(databaseUrl: string) {
+  try {
+    const url = new URL(databaseUrl);
+    if (url.password) {
+      url.password = "****";
+    }
+
+    return url.toString();
+  } catch {
+    return databaseUrl;
+  }
+}

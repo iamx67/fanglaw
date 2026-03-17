@@ -5,6 +5,12 @@
 [ext_resource type="Texture2D" uid="uid://cmbio8igt0uoc" path="res://assets/environment/kust1 (2).png" id="3_irfmk"]
 [ext_resource type="Script" uid="uid://ckiyl22absis4" path="res://scripts/world_bounds.gd" id="4_world_bounds"]
 [ext_resource type="PackedScene" path="res://scenes/player_avatar.tscn" id="5_player_avatar"]
+[ext_resource type="Script" uid="uid://g5xpdgcrrqpu" path="res://scripts/world_blockers.gd" id="6_world_blockers"]
+[ext_resource type="Script" uid="uid://18sy80goct64" path="res://scripts/world_settings.gd" id="7_world_settings"]
+[ext_resource type="Script" uid="uid://caj8b6j3yfin" path="res://scripts/world_location_zones.gd" id="8_world_location_zones"]
+[ext_resource type="Script" uid="uid://bnpj5s6lq6af2" path="res://scripts/prey_search_zones.gd" id="9_prey_search_zones"]
+[ext_resource type="Script" uid="uid://2nm1p3pd445c" path="res://scripts/world_spawn_points.gd" id="10_world_spawn_points"]
+[ext_resource type="Script" uid="uid://b4in4gwgqdkll" path="res://scripts/world_grid.gd" id="11_world_grid"]
 
 [sub_resource type="RectangleShape2D" id="RectangleShape2D_horizontal_wall"]
 size = Vector2(85952, 256)
@@ -33,20 +39,38 @@ sources/0 = SubResource("TileSetAtlasSource_1ykip")
 [node name="WorldView" type="Node2D" unique_id=1743577822]
 script = ExtResource("1_world_view")
 
+[node name="WorldSettings" type="Node" parent="." unique_id=692254919]
+script = ExtResource("7_world_settings")
+
 [node name="Players" type="Node2D" parent="." unique_id=857034952]
 z_index = 30
 y_sort_enabled = true
 
-[node name="PlayerPreview" parent="Players" instance=ExtResource("5_player_avatar")]
+[node name="PlayerPreview" parent="Players" unique_id=333606162 instance=ExtResource("5_player_avatar")]
 editor_preview_only = true
 editor_preview_name = "Preview"
-editor_preview_as_local = true
 
 [node name="Backgrounds" type="Node2D" parent="." unique_id=1806669005]
 z_index = -100
 
 [node name="Map" type="Node2D" parent="." unique_id=829624274]
 z_index = -50
+
+[node name="WorldGrid" type="Node2D" parent="." unique_id=1733447014]
+z_index = 50
+script = ExtResource("11_world_grid")
+
+[node name="Blockers" type="Node2D" parent="." unique_id=273289115]
+z_index = 45
+script = ExtResource("6_world_blockers")
+
+[node name="LocationZones" type="Node2D" parent="." unique_id=309044664]
+z_index = 44
+script = ExtResource("8_world_location_zones")
+
+[node name="PreySearchZones" type="Node2D" parent="." unique_id=1280456051]
+z_index = 43
+script = ExtResource("9_prey_search_zones")
 
 [node name="Bounds" type="Node2D" parent="." unique_id=2029396811]
 z_index = 40
@@ -77,7 +101,7 @@ position = Vector2(42848, 0)
 shape = SubResource("RectangleShape2D_vertical_wall")
 
 [node name="Props" type="Node2D" parent="." unique_id=2084971643]
-z_index = 10
+z_index = 40
 y_sort_enabled = true
 
 [node name="NPCs" type="Node2D" parent="." unique_id=890049988]
@@ -85,6 +109,7 @@ z_index = 20
 y_sort_enabled = true
 
 [node name="SpawnPoints" type="Node2D" parent="." unique_id=668320543]
+script = ExtResource("10_world_spawn_points")
 
 [node name="Camera2D" type="Camera2D" parent="." unique_id=320742266]
 limit_left = -42720
@@ -94,11 +119,12 @@ limit_bottom = 42720
 position_smoothing_enabled = true
 position_smoothing_speed = 10.0
 
-[node name="TileMapLayer" type="TileMapLayer" parent="." unique_id=381891270]
+[node name="grass" type="TileMapLayer" parent="." unique_id=381891270]
 z_index = -80
 tile_map_data = PackedByteArray("AAD/////AAAAAAAAAAAAAP//AAAAAAAAAAD//wAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAP//AAAAAAAAAAABAAAAAAAAAAAAAAACAAAAAAAAAAAAAAACAP//AAAAAAAAAAD+////AAAAAAAAAAD+/wAAAAAAAAAAAAD9/wAAAAAAAAAAAAD9////AAAAAAAAAAD9//7/AAAAAAAAAAD+//7/AAAAAAAAAAD///7/AAAAAAAAAAAAAP7/AAAAAAAAAAABAP7/AAAAAAAAAAACAP7/AAAAAAAAAAACAAEAAAAAAAAAAAABAAEAAAAAAAAAAAAAAAEAAAAAAAAAAAD//wEAAAAAAAAAAAD+/wEAAAAAAAAAAAD9/wEAAAAAAAAAAAADAP7/AAAAAAAAAAADAP//AAAAAAAAAAADAAAAAAAAAAAAAAADAAEAAAAAAAAAAAAEAP7/AAAAAAAAAAAEAP//AAAAAAAAAAAEAAAAAAAAAAAAAAAEAAEAAAAAAAAAAAAFAP7/AAAAAAAAAAAFAP//AAAAAAAAAAAFAAAAAAAAAAAAAAAFAAEAAAAAAAAAAAAGAP7/AAAAAAAAAAAGAP//AAAAAAAAAAAGAAAAAAAAAAAAAAAGAAEAAAAAAAAAAAAHAP7/AAAAAAAAAAAHAP//AAAAAAAAAAAHAAAAAAAAAAAAAAAHAAEAAAAAAAAAAAAIAP7/AAAAAAAAAAAIAP//AAAAAAAAAAAIAAAAAAAAAAAAAAAIAAEAAAAAAAAAAAAJAP7/AAAAAAAAAAAJAP//AAAAAAAAAAAJAAAAAAAAAAAAAAAJAAEAAAAAAAAAAAAKAP7/AAAAAAAAAAAKAP//AAAAAAAAAAAKAAAAAAAAAAAAAAAKAAEAAAAAAAAAAAALAP7/AAAAAAAAAAALAP//AAAAAAAAAAALAAEAAAAAAAAAAAAMAP7/AAAAAAAAAAAMAP//AAAAAAAAAAAMAAEAAAAAAAAAAAANAP7/AAAAAAAAAAANAP//AAAAAAAAAAANAAAAAAAAAAAAAAANAAEAAAAAAAAAAAAOAP7/AAAAAAAAAAAOAP//AAAAAAAAAAAOAAAAAAAAAAAAAAAOAAEAAAAAAAAAAAAPAP7/AAAAAAAAAAAPAP//AAAAAAAAAAAPAAAAAAAAAAAAAAAPAAEAAAAAAAAAAAAQAP7/AAAAAAAAAAAQAP//AAAAAAAAAAAQAAAAAAAAAAAAAAAQAAEAAAAAAAAAAAARAP7/AAAAAAAAAAARAP//AAAAAAAAAAARAAAAAAAAAAAAAAARAAEAAAAAAAAAAAASAP7/AAAAAAAAAAASAP//AAAAAAAAAAASAAAAAAAAAAAAAAASAAEAAAAAAAAAAAATAP7/AAAAAAAAAAATAP//AAAAAAAAAAATAAAAAAAAAAAAAAATAAEAAAAAAAAAAAAUAP7/AAAAAAAAAAAUAAEAAAAAAAAAAAAVAP7/AAAAAAAAAAAVAAEAAAAAAAAAAAAWAP7/AAAAAAAAAAAWAP//AAAAAAAAAAAWAAAAAAAAAAAAAAAWAAEAAAAAAAAAAAAXAP7/AAAAAAAAAAAXAP//AAAAAAAAAAAXAAAAAAAAAAAAAAAXAAEAAAAAAAAAAAAYAP7/AAAAAAAAAAAYAP//AAAAAAAAAAAYAAAAAAAAAAAAAAAYAAEAAAAAAAAAAAAZAP7/AAAAAAAAAAAZAP//AAAAAAAAAAAZAAAAAAAAAAAAAAAZAAEAAAAAAAAAAAAaAP7/AAAAAAAAAAAaAP//AAAAAAAAAAAaAAAAAAAAAAAAAAAaAAEAAAAAAAAAAAAbAP7/AAAAAAAAAAAbAP//AAAAAAAAAAAbAAAAAAAAAAAAAAAbAAEAAAAAAAAAAAAcAP7/AAAAAAAAAAAcAP//AAAAAAAAAAAcAAEAAAAAAAAAAAAdAP7/AAAAAAAAAAAdAP//AAAAAAAAAAAdAAEAAAAAAAAAAAAeAP7/AAAAAAAAAAAeAP//AAAAAAAAAAAeAAAAAAAAAAAAAAAeAAEAAAAAAAAAAAAfAP7/AAAAAAAAAAAfAP//AAAAAAAAAAAfAAAAAAAAAAAAAAAfAAEAAAAAAAAAAAAgAP7/AAAAAAAAAAAgAP//AAAAAAAAAAAgAAAAAAAAAAAAAAAgAAEAAAAAAAAAAAAhAP7/AAAAAAAAAAAhAP//AAAAAAAAAAAhAAAAAAAAAAAAAAAhAAEAAAAAAAAAAAAiAP7/AAAAAAAAAAAiAP//AAAAAAAAAAAiAAAAAAAAAAAAAAAiAAEAAAAAAAAAAAAjAP7/AAAAAAAAAAAjAAAAAAAAAAAAAAAjAAEAAAAAAAAAAAAkAP7/AAAAAAAAAAAlAP7/AAAAAAAAAAAlAP//AAAAAAAAAAAlAAAAAAAAAAAAAAAlAAEAAAAAAAAAAAAmAP7/AAAAAAAAAAAmAP//AAAAAAAAAAAmAAAAAAAAAAAAAAAmAAEAAAAAAAAAAAAnAP7/AAAAAAAAAAAnAP//AAAAAAAAAAAnAAAAAAAAAAAAAAAnAAEAAAAAAAAAAAAoAP7/AAAAAAAAAAAoAP//AAAAAAAAAAAoAAAAAAAAAAAAAAAoAAEAAAAAAAAAAAApAP7/AAAAAAAAAAApAP//AAAAAAAAAAApAAAAAAAAAAAAAAApAAEAAAAAAAAAAAA=")
 tile_set = SubResource("TileSet_irfmk")
 
-[node name="TileMapLayer2" type="TileMapLayer" parent="." unique_id=1469407261]
+[node name="bushes" type="TileMapLayer" parent="." unique_id=1469407261]
+z_index = 40
 tile_map_data = PackedByteArray("AAD///3/AAAAAAAAAAADAAAAAAAAAAAAAAD7//3/AAAAAAAAAAD8/wQAAAAAAAAAAAAGAAYAAAAAAAAAAAAFAPn/AAAAAAAAAAD5//n/AAAAAAAAAAA=")
 tile_set = SubResource("TileSet_eqm8l")
