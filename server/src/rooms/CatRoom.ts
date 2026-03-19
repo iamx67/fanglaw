@@ -7,7 +7,7 @@ import { AuthStoreError, authStore, type AuthContextData } from "../persistence/
 import { playerIdentityStore, type PlayerSnapshot } from "../persistence/PlayerIdentityStore.js";
 
 type JoinOptions = { sessionToken?: string };
-type MoveMessage = { x: number; y: number };
+type MoveMessage = { x: number; y: number; sprint?: boolean };
 type FaceMessage = { x: number };
 type SearchPreyMessage = { searchZoneId?: string };
 
@@ -23,8 +23,14 @@ type PreySpawnMeta = {
 };
 
 const BASE_GRID_STEP_COOLDOWN_MS = 130;
+const BASE_SPRINT_GRID_STEP_COOLDOWN_MS = 90;
 const BASE_GRID_TIMING_CELL_SIZE = 64;
 const GRID_TIMING_SCALE_EXPONENT = 0.8;
+const MAX_STAMINA = 100;
+const MIN_STAMINA_TO_SPRINT = 5;
+const SPRINT_STAMINA_COST = 5;
+const STAMINA_RECOVERY_PER_SECOND = 12;
+const STAMINA_RECOVERY_DELAY_MS = 900;
 const RECONNECT_WINDOW_SECONDS = 20;
 const MAX_ACTIVE_PREY = 64;
 const PREY_MOVE_INTERVAL_MS = 220;
@@ -47,6 +53,8 @@ export class CatRoom extends Room<{ state: WorldState }> {
   autoDispose = false;
   private readonly sessionToPlayerId = new Map<string, string>();
   private readonly lastMoveAt = new Map<string, number>();
+  private readonly lastSprintAt = new Map<string, number>();
+  private readonly lastStaminaTickAt = new Map<string, number>();
   private readonly searchZoneToPreyId = new Map<string, string>();
   private readonly preySpawnMeta = new Map<string, PreySpawnMeta>();
   private nextPreyId = 1;
@@ -71,11 +79,19 @@ export class CatRoom extends Room<{ state: WorldState }> {
   onCreate() {
     this.setState(new WorldState());
     this.setSimulationInterval(() => {
+      this.updatePlayerStamina();
       this.updatePreyMovement();
     }, PREY_MOVE_INTERVAL_MS);
 
     this.onMessage("ping", (client) => {
       const playerId = this.sessionToPlayerId.get(client.sessionId) ?? "";
+      const player = playerId ? this.state.players.get(playerId) : null;
+      if (player) {
+        const profile = playerIdentityStore.getOrCreateProfile(playerId, player.name, "account");
+        if (player.appearanceJson !== profile.appearanceJson) {
+          player.appearanceJson = profile.appearanceJson;
+        }
+      }
 
       client.send("pong", {
         playerId,
@@ -103,7 +119,7 @@ export class CatRoom extends Room<{ state: WorldState }> {
         return;
       }
 
-      this.tryMovePlayer(playerId, player, step);
+      this.tryMovePlayer(playerId, player, step, isSprintRequested(message));
     });
 
     this.onMessage("face", (client, message: FaceMessage) => {
@@ -171,11 +187,16 @@ export class CatRoom extends Room<{ state: WorldState }> {
     player.x = spawnPosition.x;
     player.y = spawnPosition.y;
     player.facing = profile.facing;
+    player.appearanceJson = profile.appearanceJson;
+    player.stamina = MAX_STAMINA;
+    player.sprinting = false;
     player.connected = true;
 
     this.state.players.set(playerId, player);
     this.sessionToPlayerId.set(client.sessionId, playerId);
     this.lastMoveAt.set(playerId, 0);
+    this.lastSprintAt.set(playerId, 0);
+    this.lastStaminaTickAt.set(playerId, Date.now());
 
     void playerIdentityStore.flush();
     void authStore.flush();
@@ -195,6 +216,8 @@ export class CatRoom extends Room<{ state: WorldState }> {
 
     if (!player) {
       this.lastMoveAt.delete(playerId);
+      this.lastSprintAt.delete(playerId);
+      this.lastStaminaTickAt.delete(playerId);
       return;
     }
 
@@ -202,6 +225,8 @@ export class CatRoom extends Room<{ state: WorldState }> {
       playerIdentityStore.savePlayerSnapshot(toPlayerSnapshot(player));
       this.state.players.delete(playerId);
       this.lastMoveAt.delete(playerId);
+      this.lastSprintAt.delete(playerId);
+      this.lastStaminaTickAt.delete(playerId);
       await playerIdentityStore.flush();
       console.log(`leave ${player.name} (${playerId})`);
       return;
@@ -216,18 +241,21 @@ export class CatRoom extends Room<{ state: WorldState }> {
       player.sessionId = reconnectedClient.sessionId;
       player.connected = true;
       this.lastMoveAt.set(playerId, 0);
+      this.lastStaminaTickAt.set(playerId, Date.now());
 
       console.log(`reconnect ${player.name} (${playerId} / ${reconnectedClient.sessionId})`);
     } catch {
       playerIdentityStore.savePlayerSnapshot(toPlayerSnapshot(player));
       this.state.players.delete(playerId);
       this.lastMoveAt.delete(playerId);
+      this.lastSprintAt.delete(playerId);
+      this.lastStaminaTickAt.delete(playerId);
       await playerIdentityStore.flush();
       console.log(`leave ${player.name} (${playerId}) after reconnect timeout`);
     }
   }
 
-  private tryMovePlayer(playerId: string, player: Player, step: GridStep) {
+  private tryMovePlayer(playerId: string, player: Player, step: GridStep, sprintRequested: boolean) {
     let changed = false;
     if (this.updatePlayerFacing(player, step.x)) {
       changed = true;
@@ -239,9 +267,10 @@ export class CatRoom extends Room<{ state: WorldState }> {
       Math.max(worldConfig.gridCellSize / BASE_GRID_TIMING_CELL_SIZE, 0.001),
       GRID_TIMING_SCALE_EXPONENT,
     );
+    const canSprint = sprintRequested && player.stamina >= MIN_STAMINA_TO_SPRINT;
     const gridStepCooldownMs = Math.max(
       1,
-      Math.round(BASE_GRID_STEP_COOLDOWN_MS * gridTimingScale),
+      Math.round((canSprint ? BASE_SPRINT_GRID_STEP_COOLDOWN_MS : BASE_GRID_STEP_COOLDOWN_MS) * gridTimingScale),
     );
 
     if (now - lastMoveAt < gridStepCooldownMs) {
@@ -264,9 +293,52 @@ export class CatRoom extends Room<{ state: WorldState }> {
 
     player.x = nextX;
     player.y = nextY;
+    if (canSprint) {
+      player.stamina = clamp(player.stamina - SPRINT_STAMINA_COST, 0, MAX_STAMINA);
+      player.sprinting = true;
+      this.lastSprintAt.set(playerId, now);
+    } else {
+      player.sprinting = false;
+    }
     this.lastMoveAt.set(playerId, now);
+    this.lastStaminaTickAt.set(playerId, now);
     playerIdentityStore.savePlayerSnapshot(toPlayerSnapshot(player));
     this.resolvePreyInteractionAt(playerId, player);
+  }
+
+  private updatePlayerStamina() {
+    const now = Date.now();
+    const sprintHoldMs = this.getSprintStateHoldMs();
+
+    for (const [playerId, player] of this.state.players.entries()) {
+      const lastTickAt = this.lastStaminaTickAt.get(playerId) ?? now;
+      const elapsedSeconds = Math.max(0, (now - lastTickAt) / 1000);
+      this.lastStaminaTickAt.set(playerId, now);
+
+      const lastSprintAt = this.lastSprintAt.get(playerId) ?? 0;
+      const recentlySprinting = now - lastSprintAt <= sprintHoldMs;
+      player.sprinting = recentlySprinting;
+
+      if (recentlySprinting || now - lastSprintAt < STAMINA_RECOVERY_DELAY_MS) {
+        continue;
+      }
+
+      if (player.stamina >= MAX_STAMINA) {
+        player.stamina = MAX_STAMINA;
+        continue;
+      }
+
+      player.stamina = clamp(player.stamina + STAMINA_RECOVERY_PER_SECOND * elapsedSeconds, 0, MAX_STAMINA);
+    }
+  }
+
+  private getSprintStateHoldMs() {
+    const gridTimingScale = Math.pow(
+      Math.max(worldConfig.gridCellSize / BASE_GRID_TIMING_CELL_SIZE, 0.001),
+      GRID_TIMING_SCALE_EXPONENT,
+    );
+
+    return Math.max(220, Math.round(BASE_SPRINT_GRID_STEP_COOLDOWN_MS * gridTimingScale) + 80);
   }
 
   private trySearchPrey(client: Client, player: Player, message: SearchPreyMessage) {
@@ -613,6 +685,10 @@ function parseHorizontalFacing(value: unknown) {
   }
 
   return toAxisStep(rawX);
+}
+
+function isSprintRequested(value: unknown) {
+  return isRecord(value) && value.sprint === true;
 }
 
 function getSearchSuccessChance(zone: PreySearchZone) {

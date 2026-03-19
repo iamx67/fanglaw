@@ -4,7 +4,12 @@ import { Server, matchMaker } from "colyseus";
 import { WebSocketTransport } from "@colyseus/ws-transport";
 import { CatRoom } from "./rooms/CatRoom.js";
 import { AuthStoreError, authStore } from "./persistence/AuthStore.js";
-import { playerIdentityStore } from "./persistence/PlayerIdentityStore.js";
+import {
+  PlayerIdentityStoreError,
+  parseStoredAppearanceJson,
+  playerIdentityStore,
+  type PlayerIdentity,
+} from "./persistence/PlayerIdentityStore.js";
 
 const PORT = Number(process.env.PORT ?? 2567);
 const PUBLIC_URL = process.env.PUBLIC_URL?.trim() || `http://localhost:${PORT}`;
@@ -49,11 +54,18 @@ const gameServer = new Server({
           characterName: readString(req.body?.characterName),
         });
 
-        await authStore.flush();
+        const profile = playerIdentityStore.getOrCreateProfile(
+          registration.character.characterId,
+          registration.character.name,
+          "account",
+        );
 
-        res.status(201).json(buildAuthResponse(registration.account, registration.character, registration.session.token));
+        await authStore.flush();
+        await playerIdentityStore.flush();
+
+        res.status(201).json(buildAuthResponse(registration.account, registration.character, profile, registration.session.token));
       } catch (error) {
-        respondWithAuthError(res, error);
+        respondWithApiError(res, error);
       }
     });
 
@@ -64,11 +76,18 @@ const gameServer = new Server({
           password: readString(req.body?.password),
         });
 
-        await authStore.flush();
+        const profile = playerIdentityStore.getOrCreateProfile(
+          login.character.characterId,
+          login.character.name,
+          "account",
+        );
 
-        res.json(buildAuthResponse(login.account, login.character, login.session.token));
+        await authStore.flush();
+        await playerIdentityStore.flush();
+
+        res.json(buildAuthResponse(login.account, login.character, profile, login.session.token));
       } catch (error) {
-        respondWithAuthError(res, error);
+        respondWithApiError(res, error);
       }
     });
 
@@ -76,21 +95,48 @@ const gameServer = new Server({
       try {
         const sessionToken = extractBearerToken(req);
         const auth = await authStore.getAuthBySessionToken(sessionToken);
+        const profile = playerIdentityStore.getOrCreateProfile(auth.characterId, auth.characterName, "account");
 
-        res.json({
-          ok: true,
-          sessionToken: auth.sessionToken,
-          account: {
+        res.json(buildAuthResponse(
+          {
             accountId: auth.accountId,
             email: auth.email,
           },
-          character: {
+          {
             characterId: auth.characterId,
             name: auth.characterName,
           },
-        });
+          profile,
+          auth.sessionToken,
+        ));
       } catch (error) {
-        respondWithAuthError(res, error);
+        respondWithApiError(res, error);
+      }
+    });
+
+    app.post("/api/me/appearance", async (req: Request, res: Response) => {
+      try {
+        const sessionToken = extractBearerToken(req);
+        const auth = await authStore.getAuthBySessionToken(sessionToken);
+        playerIdentityStore.getOrCreateProfile(auth.characterId, auth.characterName, "account");
+        const profile = playerIdentityStore.saveAppearanceOnce(auth.characterId, req.body?.appearance);
+
+        await playerIdentityStore.flush();
+
+        res.json(buildAuthResponse(
+          {
+            accountId: auth.accountId,
+            email: auth.email,
+          },
+          {
+            characterId: auth.characterId,
+            name: auth.characterName,
+          },
+          profile,
+          auth.sessionToken,
+        ));
+      } catch (error) {
+        respondWithApiError(res, error);
       }
     });
   },
@@ -114,6 +160,7 @@ function readString(value: unknown) {
 function buildAuthResponse(
   account: { accountId: string; email: string },
   character: { characterId: string; name: string },
+  profile: Pick<PlayerIdentity, "appearanceJson" | "appearanceLocked">,
   sessionToken: string,
 ) {
   return {
@@ -126,6 +173,8 @@ function buildAuthResponse(
     character: {
       characterId: character.characterId,
       name: character.name,
+      appearanceLocked: profile.appearanceLocked,
+      appearance: parseStoredAppearanceJson(profile.appearanceJson),
     },
   };
 }
@@ -139,9 +188,19 @@ function extractBearerToken(req: Request) {
   return authHeader.slice("Bearer ".length).trim();
 }
 
-function respondWithAuthError(res: Response, error: unknown) {
+function respondWithApiError(res: Response, error: unknown) {
   if (error instanceof AuthStoreError) {
     const status = getAuthErrorStatus(error.code);
+    res.status(status).json({
+      ok: false,
+      error: error.message,
+      code: error.code,
+    });
+    return;
+  }
+
+  if (error instanceof PlayerIdentityStoreError) {
+    const status = getPlayerProfileErrorStatus(error.code);
     res.status(status).json({
       ok: false,
       error: error.message,
@@ -156,6 +215,17 @@ function respondWithAuthError(res: Response, error: unknown) {
     error: "Internal server error",
     code: "INTERNAL_ERROR",
   });
+}
+
+function getPlayerProfileErrorStatus(code: PlayerIdentityStoreError["code"]) {
+  switch (code) {
+    case "APPEARANCE_LOCKED":
+      return 409;
+    case "INVALID_APPEARANCE":
+      return 400;
+    default:
+      return 400;
+  }
 }
 
 function getAuthErrorStatus(code: AuthStoreError["code"]) {

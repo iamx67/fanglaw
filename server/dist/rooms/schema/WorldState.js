@@ -13,6 +13,10 @@ export class Player extends Schema {
         this.name = "Cat";
         this.x = 0;
         this.y = 0;
+        this.facing = "right";
+        this.appearanceJson = "";
+        this.stamina = 100;
+        this.sprinting = false;
         this.connected = true;
     }
 }
@@ -32,15 +36,60 @@ __decorate([
     type("number")
 ], Player.prototype, "y", void 0);
 __decorate([
+    type("string")
+], Player.prototype, "facing", void 0);
+__decorate([
+    type("string")
+], Player.prototype, "appearanceJson", void 0);
+__decorate([
+    type("number")
+], Player.prototype, "stamina", void 0);
+__decorate([
+    type("boolean")
+], Player.prototype, "sprinting", void 0);
+__decorate([
     type("boolean")
 ], Player.prototype, "connected", void 0);
+export class Prey extends Schema {
+    constructor() {
+        super(...arguments);
+        this.preyId = "";
+        this.kind = "mouse";
+        this.state = "alive";
+        this.searchZoneId = "";
+        this.x = 0;
+        this.y = 0;
+    }
+}
+__decorate([
+    type("string")
+], Prey.prototype, "preyId", void 0);
+__decorate([
+    type("string")
+], Prey.prototype, "kind", void 0);
+__decorate([
+    type("string")
+], Prey.prototype, "state", void 0);
+__decorate([
+    type("string")
+], Prey.prototype, "searchZoneId", void 0);
+__decorate([
+    type("number")
+], Prey.prototype, "x", void 0);
+__decorate([
+    type("number")
+], Prey.prototype, "y", void 0);
 export class WorldState extends Schema {
     constructor() {
         super(...arguments);
         this.players = new MapSchema();
+        this.prey = new MapSchema();
     }
 }
 __decorate([
     type({ map: Player })
 ], WorldState.prototype, "players", void 0);
+__decorate([
+    type({ map: Prey })
+], WorldState.prototype, "prey", void 0);
 //# sourceMappingURL=WorldState.js.map

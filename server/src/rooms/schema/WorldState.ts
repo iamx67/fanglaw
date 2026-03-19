@@ -7,6 +7,9 @@ export class Player extends Schema {
   @type("number") x: number = 0;
   @type("number") y: number = 0;
   @type("string") facing: string = "right";
+  @type("string") appearanceJson: string = "";
+  @type("number") stamina: number = 100;
+  @type("boolean") sprinting: boolean = false;
   @type("boolean") connected: boolean = true;
 }
 

@@ -24,6 +24,8 @@ const authLoggedOut = document.getElementById("auth-logged-out");
 const authLoggedIn = document.getElementById("auth-logged-in");
 const editorPanel = document.getElementById("editor-panel");
 const editorLocked = document.getElementById("editor-locked");
+const saveAppearanceButton = document.getElementById("save-appearance-button");
+const appearanceSaveStatusNode = document.getElementById("appearance-save-status");
 const accountCharacterNameNode = document.getElementById("account-character-name");
 const accountEmailNode = document.getElementById("account-email");
 const showRegisterButton = document.getElementById("show-register-button");
@@ -228,6 +230,15 @@ function setStatus(text, isError = false) {
   statusNode.style.color = isError ? "#8f2118" : "#8d4122";
 }
 
+function setAppearanceStatus(text, isError = false) {
+  if (!appearanceSaveStatusNode) {
+    return;
+  }
+
+  appearanceSaveStatusNode.textContent = text;
+  appearanceSaveStatusNode.style.color = isError ? "#8f2118" : "#8d4122";
+}
+
 function setAuthMode(mode) {
   const registerActive = mode === "register";
   form.classList.toggle("is-hidden", !registerActive);
@@ -253,10 +264,18 @@ function setAuthenticated(payload) {
   accountCharacterNameNode.textContent = payload.character?.name || "Player";
   accountEmailNode.textContent = payload.account?.email || "";
   previewNameNode.textContent = payload.character?.name || characterNameInput.value.trim() || "Player";
+  if (payload.character?.appearance) {
+    applyAppearancePayloadToState(payload.character.appearance);
+  }
+  setAppearanceLockedState(payload.character?.appearanceLocked === true);
+  setAppearanceStatus(
+    payload.character?.appearanceLocked === true
+      ? "Окрас уже сохранён и зафиксирован."
+      : "Окрас можно сохранить только один раз на аккаунт."
+  );
 
   renderSavedState();
-  renderAppearancePayload();
-  renderPreview();
+  renderEditor();
 }
 
 function clearAuthState() {
@@ -275,8 +294,26 @@ function clearAuthState() {
   authChip.textContent = "Гость";
   accountCharacterNameNode.textContent = "Player";
   accountEmailNode.textContent = "";
+  setAppearanceLockedState(false);
+  setAppearanceStatus("Окрас можно сохранить только один раз на аккаунт.");
   renderSavedState();
   renderPreview();
+}
+
+function setAppearanceLockedState(isLocked) {
+  const editorInputs = editorPanel.querySelectorAll("input, select, button");
+  editorInputs.forEach((element) => {
+    if (element.id === "save-appearance-button") {
+      return;
+    }
+
+    element.disabled = Boolean(isLocked);
+  });
+
+  if (saveAppearanceButton) {
+    saveAppearanceButton.disabled = !authState.sessionToken || Boolean(isLocked);
+    saveAppearanceButton.textContent = isLocked ? "Окрас сохранён" : "Сохранить окрас";
+  }
 }
 
 function renderSavedState() {
@@ -831,6 +868,43 @@ async function restoreSession() {
   }
 }
 
+async function saveAppearance() {
+  if (!authState.sessionToken) {
+    setAppearanceStatus("Сначала нужно войти на сайт.", true);
+    return;
+  }
+
+  if (authState.character?.appearanceLocked) {
+    setAppearanceStatus("Окрас уже зафиксирован и не может быть изменён.", true);
+    return;
+  }
+
+  try {
+    const response = await fetch(`${API_BASE}/api/me/appearance`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${authState.sessionToken}`,
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: JSON.stringify({
+        appearance: buildAppearancePayload(),
+      }),
+    });
+
+    const payload = await response.json();
+    if (!response.ok || !payload.ok) {
+      throw new Error(payload.error || "Не удалось сохранить окрас.");
+    }
+
+    setAuthenticated(payload);
+    setAppearanceStatus("Окрас сохранён. Теперь он зафиксирован за персонажем.");
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Не удалось сохранить окрас.";
+    setAppearanceStatus(message, true);
+  }
+}
+
 function ensureMinimumSlots(slots, minCount) {
   const normalized = Array.isArray(slots)
     ? slots.map((slot) => ({
@@ -1063,8 +1137,8 @@ function renderPatternSlotControls() {
   refreshNaturalColorInputs(tailPatternSlotsNode);
 }
 
-function renderAppearancePayload() {
-  const payload = {
+function buildAppearancePayload() {
+  return {
     body: {
       base_id: "bodybase",
       shadow_id: "bodybaseshadow",
@@ -1117,7 +1191,46 @@ function renderAppearancePayload() {
         color: slot.color,
       })),
   };
+}
 
+function applyAppearancePayloadToState(payload) {
+  if (!payload || typeof payload !== "object") {
+    return;
+  }
+
+  appearanceState.body_color = normalizeNaturalColor(payload.body?.color || appearanceState.body_color);
+  appearanceState.eye_color = normalizeNaturalColor(payload.eyes?.color || appearanceState.eye_color);
+  appearanceState.nose_color = normalizeNaturalColor(payload.nose?.color || appearanceState.nose_color);
+  appearanceState.ears_id = payload.ears?.id || appearanceState.ears_id;
+  appearanceState.ears_color = normalizeNaturalColor(payload.ears?.color || appearanceState.ears_color);
+  appearanceState.tail_id = payload.tail?.id || appearanceState.tail_id;
+  appearanceState.tail_color = normalizeNaturalColor(payload.tail?.color || appearanceState.tail_color);
+  appearanceState.mane_id = payload.mane?.id || "none";
+  appearanceState.mane_color = normalizeNaturalColor(payload.mane?.color || appearanceState.mane_color);
+  appearanceState.cheeks_id = payload.cheeks?.id || "none";
+  appearanceState.body_pattern_slots = ensureMinimumSlots(
+    Array.isArray(payload.body_pattern_layers)
+      ? payload.body_pattern_layers.map((layer) => ({
+          pattern_id: typeof layer?.id === "string" ? layer.id : "none",
+          color: normalizeNaturalColor(typeof layer?.color === "string" ? layer.color : DEFAULT_NATURAL_WHITE),
+        }))
+      : [],
+    1,
+  );
+  appearanceState.tail_pattern_slots = ensureMinimumSlots(
+    Array.isArray(payload.tail_pattern_layers)
+      ? payload.tail_pattern_layers.map((layer) => ({
+          pattern_id: typeof layer?.id === "string" ? layer.id : "none",
+          color: normalizeNaturalColor(typeof layer?.color === "string" ? layer.color : DEFAULT_NATURAL_WHITE),
+        }))
+      : [],
+    1,
+  );
+  normalizeTailPatternSlots();
+}
+
+function renderAppearancePayload() {
+  const payload = buildAppearancePayload();
   appearancePayloadNode.textContent = JSON.stringify(payload, null, 2);
 }
 
@@ -1307,9 +1420,12 @@ function bindStaticEditorEvents() {
     });
   }
 
-  bodyPatternAddButton?.addEventListener("click", () => addPatternSlot("body"));
-  tailPatternAddButton?.addEventListener("click", () => addPatternSlot("tail"));
-  refreshNaturalColorInputs(editorPanel);
+bodyPatternAddButton?.addEventListener("click", () => addPatternSlot("body"));
+tailPatternAddButton?.addEventListener("click", () => addPatternSlot("tail"));
+saveAppearanceButton?.addEventListener("click", () => {
+  void saveAppearance();
+});
+refreshNaturalColorInputs(editorPanel);
 }
 
 showRegisterButton.addEventListener("click", () => setAuthMode("register"));
@@ -1334,6 +1450,8 @@ loadDraftAppearance();
 syncControlsFromState();
 bindStaticEditorEvents();
 renderAppearancePayload();
+setAppearanceLockedState(false);
+setAppearanceStatus("Окрас можно сохранить только один раз на аккаунт.");
 setAuthMode("register");
 
 bootPreviewAssets()

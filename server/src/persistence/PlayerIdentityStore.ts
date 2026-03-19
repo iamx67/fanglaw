@@ -9,6 +9,8 @@ export type PlayerIdentity = {
   x: number;
   y: number;
   facing: "left" | "right";
+  appearanceJson: string;
+  appearanceLocked: boolean;
   createdAt: number;
   updatedAt: number;
 };
@@ -23,6 +25,7 @@ export type PlayerSnapshot = {
 
 export interface PlayerIdentityStoreBackend {
   load(): Promise<void>;
+  getProfile(playerId: string): PlayerIdentity | null;
   getOrCreateProfile(
     playerId: string,
     suggestedName?: string,
@@ -30,6 +33,7 @@ export interface PlayerIdentityStoreBackend {
   ): PlayerIdentity;
   getOrCreateGuestProfile(playerId: string, suggestedName?: string): PlayerIdentity;
   savePlayerSnapshot(snapshot: PlayerSnapshot): PlayerIdentity;
+  saveAppearanceOnce(playerId: string, appearance: unknown): PlayerIdentity;
   flush(): Promise<void>;
 }
 
@@ -39,6 +43,16 @@ type StoredPlayersFile = {
 };
 
 const FLUSH_DEBOUNCE_MS = 750;
+const MAX_APPEARANCE_JSON_BYTES = 24_000;
+
+export class PlayerIdentityStoreError extends Error {
+  constructor(
+    message: string,
+    readonly code: "APPEARANCE_LOCKED" | "INVALID_APPEARANCE",
+  ) {
+    super(message);
+  }
+}
 
 class FilePlayerIdentityStore implements PlayerIdentityStoreBackend {
   private readonly profiles = new Map<string, PlayerIdentity>();
@@ -73,6 +87,8 @@ class FilePlayerIdentityStore implements PlayerIdentityStoreBackend {
             x: normalizeStoredNumber(profile.x),
             y: normalizeStoredNumber(profile.y),
             facing: normalizeStoredFacing(profile.facing),
+            appearanceJson: normalizeStoredAppearanceJson(profile.appearanceJson),
+            appearanceLocked: normalizeStoredAppearanceLocked(profile.appearanceLocked),
             createdAt: normalizeStoredTimestamp(profile.createdAt),
             updatedAt: normalizeStoredTimestamp(profile.updatedAt),
           });
@@ -85,6 +101,10 @@ class FilePlayerIdentityStore implements PlayerIdentityStoreBackend {
     }
 
     this.loaded = true;
+  }
+
+  getProfile(playerId: string) {
+    return this.profiles.get(playerId) ?? null;
   }
 
   getOrCreateProfile(
@@ -123,6 +143,8 @@ class FilePlayerIdentityStore implements PlayerIdentityStoreBackend {
       x: 0,
       y: 0,
       facing: "right",
+      appearanceJson: "",
+      appearanceLocked: false,
       createdAt: now,
       updatedAt: now,
     };
@@ -171,6 +193,18 @@ class FilePlayerIdentityStore implements PlayerIdentityStoreBackend {
       this.touch(profile);
     }
 
+    return profile;
+  }
+
+  saveAppearanceOnce(playerId: string, appearance: unknown) {
+    const profile = this.getOrCreateProfile(playerId, "", "account");
+    if (profile.appearanceLocked || profile.appearanceJson) {
+      throw new PlayerIdentityStoreError("Appearance is already locked", "APPEARANCE_LOCKED");
+    }
+
+    profile.appearanceJson = serializeAppearancePayload(appearance);
+    profile.appearanceLocked = true;
+    this.touch(profile);
     return profile;
   }
 
@@ -262,6 +296,10 @@ class RuntimePlayerIdentityStore implements PlayerIdentityStoreBackend {
     }
   }
 
+  getProfile(playerId: string) {
+    return this.requireBackend().getProfile(playerId);
+  }
+
   getOrCreateProfile(
     playerId: string,
     suggestedName = "",
@@ -276,6 +314,10 @@ class RuntimePlayerIdentityStore implements PlayerIdentityStoreBackend {
 
   savePlayerSnapshot(snapshot: PlayerSnapshot) {
     return this.requireBackend().savePlayerSnapshot(snapshot);
+  }
+
+  saveAppearanceOnce(playerId: string, appearance: unknown) {
+    return this.requireBackend().saveAppearanceOnce(playerId, appearance);
   }
 
   async flush() {
@@ -296,12 +338,14 @@ function serializePlayersFile(players: Map<string, PlayerIdentity>): StoredPlaye
 
   for (const [playerId, profile] of players.entries()) {
     serializedPlayers[playerId] = {
-      ...profile,
+      playerId,
       accountType: normalizeStoredAccountType(profile.accountType),
       name: normalizeStoredName(profile.name),
       x: normalizeStoredNumber(profile.x),
       y: normalizeStoredNumber(profile.y),
       facing: normalizeStoredFacing(profile.facing),
+      appearanceJson: normalizeStoredAppearanceJson(profile.appearanceJson),
+      appearanceLocked: normalizeStoredAppearanceLocked(profile.appearanceLocked),
       createdAt: normalizeStoredTimestamp(profile.createdAt),
       updatedAt: normalizeStoredTimestamp(profile.updatedAt),
     };
@@ -322,20 +366,96 @@ export function normalizeStoredName(value: unknown) {
     return "Cat";
   }
 
-  const sanitized = value.trim().slice(0, 16);
-  return sanitized || "Cat";
+  const normalized = value.trim().slice(0, 16);
+  return normalized || "Cat";
 }
 
 export function normalizeStoredNumber(value: unknown) {
-  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+
+  if (typeof value === "string") {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+
+  return 0;
 }
 
 export function normalizeStoredFacing(value: unknown): PlayerIdentity["facing"] {
   return value === "left" ? "left" : "right";
 }
 
+export function normalizeStoredAppearanceJson(value: unknown) {
+  if (typeof value !== "string") {
+    return "";
+  }
+
+  const normalized = value.trim();
+  if (!normalized) {
+    return "";
+  }
+
+  return normalized.slice(0, MAX_APPEARANCE_JSON_BYTES);
+}
+
+export function normalizeStoredAppearanceLocked(value: unknown) {
+  return value === true;
+}
+
 export function normalizeStoredTimestamp(value: unknown) {
-  return typeof value === "number" && Number.isFinite(value) ? value : Date.now();
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+
+  if (typeof value === "string") {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+
+  return Date.now();
+}
+
+export function serializeAppearancePayload(appearance: unknown) {
+  if (!appearance || typeof appearance !== "object" || Array.isArray(appearance)) {
+    throw new PlayerIdentityStoreError("Appearance payload is invalid", "INVALID_APPEARANCE");
+  }
+
+  let serialized = "";
+  try {
+    serialized = JSON.stringify(appearance);
+  } catch {
+    throw new PlayerIdentityStoreError("Appearance payload is invalid", "INVALID_APPEARANCE");
+  }
+
+  if (!serialized || serialized.length > MAX_APPEARANCE_JSON_BYTES) {
+    throw new PlayerIdentityStoreError("Appearance payload is invalid", "INVALID_APPEARANCE");
+  }
+
+  return serialized;
+}
+
+export function parseStoredAppearanceJson(appearanceJson: string) {
+  const normalized = normalizeStoredAppearanceJson(appearanceJson);
+  if (!normalized) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(normalized);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return null;
+    }
+
+    return parsed as Record<string, unknown>;
+  } catch {
+    return null;
+  }
 }
 
 function isMissingFileError(error: unknown): error is NodeJS.ErrnoException {
@@ -356,13 +476,11 @@ export const playerIdentityStore = new RuntimePlayerIdentityStore(
 
 function maskDatabaseUrl(databaseUrl: string) {
   try {
-    const url = new URL(databaseUrl);
-    if (url.password) {
-      url.password = "****";
-    }
-
-    return url.toString();
+    const parsed = new URL(databaseUrl);
+    const authSuffix = parsed.username ? `${parsed.username}@` : "";
+    const portSuffix = parsed.port ? `:${parsed.port}` : "";
+    return `${parsed.protocol}//${authSuffix}${parsed.hostname}${portSuffix}${parsed.pathname}`;
   } catch {
-    return databaseUrl;
+    return "<invalid DATABASE_URL>";
   }
 }

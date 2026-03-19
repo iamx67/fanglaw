@@ -290,6 +290,8 @@ function normalizeInputData(authFile: StoredAuthFile, playersFile: StoredPlayers
       x: normalizeStoredNumber(profile.x),
       y: normalizeStoredNumber(profile.y),
       facing: normalizeStoredFacing(profile.facing),
+      appearanceJson: typeof profile.appearanceJson === "string" ? profile.appearanceJson : "",
+      appearanceLocked: profile.appearanceLocked === true,
       createdAt: normalizeStoredTimestamp(profile.createdAt),
       updatedAt: normalizeStoredTimestamp(profile.updatedAt),
     });
@@ -305,6 +307,8 @@ function normalizeInputData(authFile: StoredAuthFile, playersFile: StoredPlayers
         x: 0,
         y: 0,
         facing: "right",
+        appearanceJson: "",
+        appearanceLocked: false,
         createdAt: character.createdAt,
         updatedAt: character.updatedAt,
       });

@@ -9,18 +9,6 @@
 [ext_resource type="Texture2D" uid="uid://cipmkbclq3wjy" path="res://assets/environment/bub.png" id="7_4c57u"]
 [ext_resource type="Texture2D" uid="uid://cqqo105ahnld6" path="res://assets/environment/ozero1.png" id="7_dg77c"]
 [ext_resource type="PackedScene" uid="uid://co5c1sh445lo1" path="res://scenes/world_blocker.tscn" id="7_efxa6"]
-[ext_resource type="Texture2D" uid="uid://ccvtu2lh6cok3" path="res://assets/backgrounds/jija.png" id="9_dg77c"]
-
-[sub_resource type="TileSetAtlasSource" id="TileSetAtlasSource_ycdy4"]
-texture = ExtResource("9_dg77c")
-texture_region_size = Vector2i(1024, 936)
-28:24/0 = 0
-0:13/0 = 0
-0:0/0 = 0
-
-[sub_resource type="TileSet" id="TileSet_w48qg"]
-tile_size = Vector2i(1024, 936)
-sources/0 = SubResource("TileSetAtlasSource_ycdy4")
 
 [node name="Main" type="Control" unique_id=1359710790]
 layout_mode = 3
@@ -32,35 +20,10 @@ grow_vertical = 2
 script = ExtResource("1_main")
 
 [node name="WorldView" parent="." unique_id=1976402734 instance=ExtResource("2_world_view")]
-camera_zoom_min = null
-camera_zoom_max = null
-camera_zoom_step = null
 
 [node name="PlayerPreview" parent="WorldView/DepthObjects" parent_id_path=PackedInt32Array(1976402734, 857034952) index="0" unique_id=333606162]
-pattern_01_enabled = false
-pattern_02_enabled = true
-pattern_03_enabled = true
-fur_color = Color(0.2819191, 0.28191918, 0.28191897, 1)
-pattern_02_color = Color(0.5037687, 0.5037684, 0.5037685, 1)
-pattern_03_color = Color(0.3019608, 0.29803923, 0.28235295, 1)
-eye_color = Color(0.5623429, 0.08591739, 0.350751, 1)
-
-[node name="BodySprite" parent="WorldView/DepthObjects/PlayerPreview/CharacterRoot" index="0"]
-modulate = Color(0.2819191, 0.28191918, 0.28191897, 1)
-
-[node name="PatternSprite01" parent="WorldView/DepthObjects/PlayerPreview/CharacterRoot" index="1"]
-visible = false
-
-[node name="PatternSprite02" parent="WorldView/DepthObjects/PlayerPreview/CharacterRoot" index="2"]
-visible = true
-modulate = Color(0.5037687, 0.5037684, 0.5037685, 1)
-
-[node name="PatternSprite03" parent="WorldView/DepthObjects/PlayerPreview/CharacterRoot" index="3"]
-visible = true
-modulate = Color(0.3019608, 0.29803923, 0.28235295, 1)
-
-[node name="EyesIrisSprite" parent="WorldView/DepthObjects/PlayerPreview/CharacterRoot" index="6"]
-modulate = Color(0.5623429, 0.08591739, 0.350751, 1)
+editor_preview_only = true
+editor_preview_name = "Preview"
 
 [node name="Sprite2D" parent="WorldView/DepthObjects/PreyPreview/VisualRoot" parent_id_path=PackedInt32Array(1976402734, 1611461697, 1269698390) index="0" unique_id=1774885751]
 texture = ExtResource("5_lquwl")
@@ -170,10 +133,6 @@ super_major_line_alpha = 0.45
 axis_alpha = 0.6
 border_alpha = 0.45
 
-[node name="TileMapLayer" type="TileMapLayer" parent="WorldView" unique_id=1663391975]
-tile_map_data = PackedByteArray("AACg/h0AAAAAAAAAAABg/h0AAAAAAAAAAABg/lcAAAAAAAAAAAD6/wAAAAAAAAAAAAD5/wAAAAAAAAAAAAD4/wAAAAAAAAAAAAD4////AAAAAAAAAAD5////AAAAAAAAAAD5//7/AAAAAAAAAAD4//7/AAAAAAAAAAD4//3/AAAAAAAAAAD5//3/AAAAAAAAAAD6/wEAAAAAAAAAAAD5/wEAAAAAAAAAAAD4/wEAAAAAAAAAAAD4/wIAAAAAAAAAAAD5/wIAAAAAAAAAAAD6/wIAAAAAAAAAAAD7/wIAAAAAAAAAAAD8/wIAAAAAAAAAAAA=")
-tile_set = SubResource("TileSet_w48qg")
-
 [node name="ActionLayer" type="CanvasLayer" parent="." unique_id=109087741]
 layer = 5
 
@@ -185,6 +144,42 @@ anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
 mouse_filter = 2
+
+[node name="TopLeft" type="MarginContainer" parent="ActionLayer/ActionOverlay"]
+layout_mode = 1
+anchors_preset = 0
+offset_left = 20.0
+offset_top = 20.0
+offset_right = 280.0
+offset_bottom = 92.0
+mouse_filter = 2
+
+[node name="StaminaPanel" type="PanelContainer" parent="ActionLayer/ActionOverlay/TopLeft"]
+custom_minimum_size = Vector2(260, 0)
+layout_mode = 2
+mouse_filter = 2
+
+[node name="Margin" type="MarginContainer" parent="ActionLayer/ActionOverlay/TopLeft/StaminaPanel"]
+layout_mode = 2
+theme_override_constants/margin_left = 12
+theme_override_constants/margin_top = 10
+theme_override_constants/margin_right = 12
+theme_override_constants/margin_bottom = 12
+
+[node name="VBox" type="VBoxContainer" parent="ActionLayer/ActionOverlay/TopLeft/StaminaPanel/Margin"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="StaminaLabel" type="Label" parent="ActionLayer/ActionOverlay/TopLeft/StaminaPanel/Margin/VBox"]
+layout_mode = 2
+text = "Stamina 100%"
+
+[node name="StaminaBar" type="ProgressBar" parent="ActionLayer/ActionOverlay/TopLeft/StaminaPanel/Margin/VBox"]
+custom_minimum_size = Vector2(236, 20)
+layout_mode = 2
+max_value = 100.0
+value = 100.0
+show_percentage = false
 
 [node name="BottomCenter" type="CenterContainer" parent="ActionLayer/ActionOverlay" unique_id=1662231881]
 layout_mode = 1

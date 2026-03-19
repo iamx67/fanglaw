@@ -1,9 +1,13 @@
 import {
+  PlayerIdentityStoreError,
   normalizeStoredAccountType,
+  normalizeStoredAppearanceJson,
+  normalizeStoredAppearanceLocked,
   normalizeStoredFacing,
   normalizeStoredName,
   normalizeStoredNumber,
   normalizeStoredTimestamp,
+  serializeAppearancePayload,
   type PlayerIdentity,
   type PlayerIdentityStoreBackend,
   type PlayerSnapshot,
@@ -37,12 +41,20 @@ CREATE TABLE IF NOT EXISTS player_profiles (
   x DOUBLE PRECISION NOT NULL DEFAULT 0,
   y DOUBLE PRECISION NOT NULL DEFAULT 0,
   facing TEXT NOT NULL DEFAULT 'right',
+  appearance_json TEXT NOT NULL DEFAULT '',
+  appearance_locked BOOLEAN NOT NULL DEFAULT FALSE,
   created_at BIGINT NOT NULL,
   updated_at BIGINT NOT NULL
 );
 
 ALTER TABLE player_profiles
   ADD COLUMN IF NOT EXISTS facing TEXT NOT NULL DEFAULT 'right';
+
+ALTER TABLE player_profiles
+  ADD COLUMN IF NOT EXISTS appearance_json TEXT NOT NULL DEFAULT '';
+
+ALTER TABLE player_profiles
+  ADD COLUMN IF NOT EXISTS appearance_locked BOOLEAN NOT NULL DEFAULT FALSE;
 
 CREATE INDEX IF NOT EXISTS player_profiles_account_type_idx
   ON player_profiles (account_type);
@@ -84,6 +96,8 @@ export class PostgresPlayerIdentityStore implements PlayerIdentityStoreBackend {
         x,
         y,
         facing,
+        appearance_json,
+        appearance_locked,
         created_at,
         updated_at
       FROM player_profiles`,
@@ -95,6 +109,10 @@ export class PostgresPlayerIdentityStore implements PlayerIdentityStoreBackend {
     }
 
     this.loaded = true;
+  }
+
+  getProfile(playerId: string) {
+    return this.profiles.get(playerId) ?? null;
   }
 
   getOrCreateProfile(
@@ -133,6 +151,8 @@ export class PostgresPlayerIdentityStore implements PlayerIdentityStoreBackend {
       x: 0,
       y: 0,
       facing: "right",
+      appearanceJson: "",
+      appearanceLocked: false,
       createdAt: now,
       updatedAt: now,
     };
@@ -184,8 +204,20 @@ export class PostgresPlayerIdentityStore implements PlayerIdentityStoreBackend {
     return profile;
   }
 
+  saveAppearanceOnce(playerId: string, appearance: unknown) {
+    const profile = this.getOrCreateProfile(playerId, "", "account");
+    if (profile.appearanceLocked || profile.appearanceJson) {
+      throw new PlayerIdentityStoreError("Appearance is already locked", "APPEARANCE_LOCKED");
+    }
+
+    profile.appearanceJson = serializeAppearancePayload(appearance);
+    profile.appearanceLocked = true;
+    this.touch(profile);
+    return profile;
+  }
+
   async flush() {
-    if (!this.loaded || this.dirtyPlayerIds.size == 0) {
+    if (!this.loaded || this.dirtyPlayerIds.size === 0) {
       return this.writeQueue;
     }
 
@@ -211,15 +243,19 @@ export class PostgresPlayerIdentityStore implements PlayerIdentityStoreBackend {
               x,
               y,
               facing,
+              appearance_json,
+              appearance_locked,
               created_at,
               updated_at
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
             ON CONFLICT (player_id) DO UPDATE SET
               account_type = EXCLUDED.account_type,
               name = EXCLUDED.name,
               x = EXCLUDED.x,
               y = EXCLUDED.y,
               facing = EXCLUDED.facing,
+              appearance_json = EXCLUDED.appearance_json,
+              appearance_locked = EXCLUDED.appearance_locked,
               created_at = EXCLUDED.created_at,
               updated_at = EXCLUDED.updated_at`,
             [
@@ -229,6 +265,8 @@ export class PostgresPlayerIdentityStore implements PlayerIdentityStoreBackend {
               profile.x,
               profile.y,
               profile.facing,
+              profile.appearanceJson,
+              profile.appearanceLocked,
               profile.createdAt,
               profile.updatedAt,
             ],
@@ -290,32 +328,15 @@ export class PostgresPlayerIdentityStore implements PlayerIdentityStoreBackend {
 
 function mapProfileRow(row: DatabaseRow): PlayerIdentity {
   return {
-    playerId: stringValue(row.player_id),
+    playerId: typeof row.player_id === "string" ? row.player_id : "",
     accountType: normalizeStoredAccountType(row.account_type),
     name: normalizeStoredName(row.name),
-    x: normalizeStoredNumber(numberValue(row.x)),
-    y: normalizeStoredNumber(numberValue(row.y)),
+    x: normalizeStoredNumber(row.x),
+    y: normalizeStoredNumber(row.y),
     facing: normalizeStoredFacing(row.facing),
-    createdAt: normalizeStoredTimestamp(numberValue(row.created_at)),
-    updatedAt: normalizeStoredTimestamp(numberValue(row.updated_at)),
+    appearanceJson: normalizeStoredAppearanceJson(row.appearance_json),
+    appearanceLocked: normalizeStoredAppearanceLocked(row.appearance_locked),
+    createdAt: normalizeStoredTimestamp(row.created_at),
+    updatedAt: normalizeStoredTimestamp(row.updated_at),
   };
-}
-
-function stringValue(value: unknown) {
-  return typeof value === "string" ? value : "";
-}
-
-function numberValue(value: unknown) {
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return value;
-  }
-
-  if (typeof value === "string") {
-    const parsed = Number(value);
-    if (Number.isFinite(parsed)) {
-      return parsed;
-    }
-  }
-
-  return 0;
 }

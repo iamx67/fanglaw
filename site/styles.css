@@ -248,12 +248,21 @@ input.native-color-input {
   color: var(--accent-strong);
 }
 
+.compact-status {
+  min-height: 0;
+  margin-top: 12px;
+}
+
 .saved-box {
   margin-top: 22px;
   padding: 22px;
   border-radius: 22px;
   background: rgba(255, 255, 255, 0.58);
   border: 1px solid rgba(85, 56, 37, 0.12);
+}
+
+.saved-box .button {
+  width: 100%;
 }
 
 .saved-box pre {

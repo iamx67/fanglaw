@@ -16,11 +16,15 @@ const ROOM_NAME := "cats"
 const PING_INTERVAL := 2.0
 const AUTO_CONNECT_RETRY_SECONDS := 3.0
 const BASE_GRID_MOVE_REPEAT_SECONDS := 0.13
+const BASE_SPRINT_GRID_MOVE_REPEAT_SECONDS := 0.09
 const BASE_CELL_TRANSITION_DURATION := 0.13
+const BASE_SPRINT_CELL_TRANSITION_DURATION := 0.09
 const BASE_GRID_TIMING_CELL_SIZE := 64.0
 const GRID_TIMING_SCALE_EXPONENT := 0.8
 const VISUAL_STEP_OVERLAP_RATIO := 1.04
 const GRID_POSITION_EPSILON := 0.1
+const MAX_STAMINA := 100.0
+const MIN_STAMINA_TO_SPRINT := 5.0
 const RANDOM_NAME_LENGTH := 8
 const RANDOM_NAME_ALPHABET := "abcdefghijklmnopqrstuvwxyz"
 const SETTINGS_PATH := "user://catlaw_client.cfg"
@@ -38,6 +42,7 @@ const MOVE_UP_LEFT_ACTION := &"move_up_left"
 const MOVE_UP_RIGHT_ACTION := &"move_up_right"
 const MOVE_DOWN_LEFT_ACTION := &"move_down_left"
 const MOVE_DOWN_RIGHT_ACTION := &"move_down_right"
+const MOVE_SPRINT_ACTION := &"move_sprint"
 
 enum ConnectionState {
 	OFFLINE,
@@ -56,6 +61,9 @@ class Player extends colyseus.Schema:
 			colyseus.Field.new("x", colyseus.NUMBER),
 			colyseus.Field.new("y", colyseus.NUMBER),
 			colyseus.Field.new("facing", colyseus.STRING),
+			colyseus.Field.new("appearanceJson", colyseus.STRING),
+			colyseus.Field.new("stamina", colyseus.NUMBER),
+			colyseus.Field.new("sprinting", colyseus.BOOLEAN),
 			colyseus.Field.new("connected", colyseus.BOOLEAN),
 		]
 
@@ -79,6 +87,10 @@ class RoomState extends colyseus.Schema:
 
 @onready var world_view: WorldView = $WorldView
 @onready var action_overlay: Control = $ActionLayer/ActionOverlay
+@onready var stamina_hud: Control = $ActionLayer/ActionOverlay/TopLeft/StaminaPanel
+@onready var stamina_label: Label = $ActionLayer/ActionOverlay/TopLeft/StaminaPanel/Margin/VBox/StaminaLabel
+@onready var stamina_bar: ProgressBar = $ActionLayer/ActionOverlay/TopLeft/StaminaPanel/Margin/VBox/StaminaBar
+@onready var action_bottom_center: Control = $ActionLayer/ActionOverlay/BottomCenter
 @onready var search_prey_button: Button = $ActionLayer/ActionOverlay/BottomCenter/SearchPreyButton
 @onready var auth_overlay: Control = $AuthLayer/AuthOverlay
 @onready var auth_title_label: Label = $AuthLayer/AuthOverlay/Center/Panel/Margin/VBox/Title
@@ -102,9 +114,11 @@ var current_player_name := ""
 var current_session_token := ""
 var current_reconnection_token := ""
 var avatars: Dictionary = {}
+var avatar_appearance_jsons: Dictionary = {}
 var avatar_target_positions: Dictionary = {}
 var avatar_world_positions: Dictionary = {}
 var avatar_step_distances: Dictionary = {}
+var avatar_step_durations: Dictionary = {}
 var prey_avatars: Dictionary = {}
 var is_connecting := false
 var auto_connect_retry_scheduled := false
@@ -122,6 +136,8 @@ var auth_login_in_progress := false
 var active_prey_search_zone = null
 var local_facing := "right"
 var last_sent_facing := ""
+var local_stamina := MAX_STAMINA
+var local_is_sprinting := false
 
 func _ready() -> void:
 	focus_mode = Control.FOCUS_ALL
@@ -164,13 +180,15 @@ func _process(delta: float) -> void:
 func _grid_timing_scale() -> float:
 	return pow(maxf(WorldConfig.cell_size() / BASE_GRID_TIMING_CELL_SIZE, 0.001), GRID_TIMING_SCALE_EXPONENT)
 
-func _grid_move_repeat_seconds() -> float:
-	return BASE_GRID_MOVE_REPEAT_SECONDS * _grid_timing_scale()
+func _grid_move_repeat_seconds(is_sprinting := false) -> float:
+	var base_duration := BASE_SPRINT_GRID_MOVE_REPEAT_SECONDS if is_sprinting else BASE_GRID_MOVE_REPEAT_SECONDS
+	return base_duration * _grid_timing_scale()
 
-func _cell_transition_duration() -> float:
+func _cell_transition_duration(is_sprinting := false) -> float:
 	# Slight overlap keeps step-to-step motion continuous instead of briefly stopping
 	# between accepted grid moves when the key is held.
-	return (BASE_CELL_TRANSITION_DURATION * _grid_timing_scale()) * VISUAL_STEP_OVERLAP_RATIO
+	var base_duration := BASE_SPRINT_CELL_TRANSITION_DURATION if is_sprinting else BASE_CELL_TRANSITION_DURATION
+	return (base_duration * _grid_timing_scale()) * VISUAL_STEP_OVERLAP_RATIO
 
 func _begin_auto_connect() -> void:
 	if _has_reconnection_token():
@@ -445,6 +463,7 @@ func _register_player(player_id: String, player: Player) -> void:
 	var is_local_avatar := _is_local_player(player_id, player)
 	avatar.configure(_display_player_name(player), is_local_avatar)
 	avatar.modulate = Color(1, 1, 1, 1.0 if player.connected else 0.55)
+	_apply_player_appearance(player_id, avatar, player)
 	if avatar.has_method("set_facing"):
 		avatar.set_facing(_normalize_player_facing(player))
 
@@ -452,9 +471,21 @@ func _register_player(player_id: String, player: Player) -> void:
 	if is_local_avatar:
 		_store_local_player_identity(player_id, player, is_new_avatar)
 	else:
-		_set_avatar_target(player_id, position, is_new_avatar)
+		_set_avatar_target(player_id, position, is_new_avatar, _transition_duration_for_player(player))
 
-func _set_avatar_target(player_id: String, world_position: Vector2, snap_to_target := false) -> void:
+func _apply_player_appearance(player_id: String, avatar, player: Player) -> void:
+	if avatar == null or player == null or not avatar.has_method("apply_appearance_json"):
+		return
+
+	var appearance_json := str(player.appearanceJson).strip_edges()
+	var previous_json := str(avatar_appearance_jsons.get(player_id, ""))
+	if appearance_json == previous_json:
+		return
+
+	avatar_appearance_jsons[player_id] = appearance_json
+	avatar.apply_appearance_json(appearance_json)
+
+func _set_avatar_target(player_id: String, world_position: Vector2, snap_to_target := false, transition_duration := -1.0) -> void:
 	var avatar = avatars.get(player_id)
 	if avatar == null:
 		return
@@ -470,6 +501,7 @@ func _set_avatar_target(player_id: String, world_position: Vector2, snap_to_targ
 		avatar_step_distances[player_id] = maxf(step_distance, WorldConfig.cell_size())
 
 	avatar_target_positions[player_id] = world_position
+	avatar_step_durations[player_id] = transition_duration if transition_duration > 0.0 else _cell_transition_duration()
 	if avatar.has_method("set_moving"):
 		avatar.set_moving(not snap_to_target and avatar.position.distance_to(world_position) > 1.0)
 
@@ -496,9 +528,11 @@ func _remove_avatar(player_id: String) -> void:
 		return
 
 	avatars.erase(player_id)
+	avatar_appearance_jsons.erase(player_id)
 	avatar_target_positions.erase(player_id)
 	avatar_world_positions.erase(player_id)
 	avatar_step_distances.erase(player_id)
+	avatar_step_durations.erase(player_id)
 	avatar.queue_free()
 
 func _register_prey(prey_id: String, prey: Prey) -> void:
@@ -543,9 +577,11 @@ func _clear_world() -> void:
 			avatar.queue_free()
 
 	avatars.clear()
+	avatar_appearance_jsons.clear()
 	avatar_target_positions.clear()
 	avatar_world_positions.clear()
 	avatar_step_distances.clear()
+	avatar_step_durations.clear()
 	_clear_prey()
 	local_player_id = ""
 	local_position = Vector2.ZERO
@@ -556,7 +592,10 @@ func _clear_world() -> void:
 	active_prey_search_zone = null
 	local_facing = "right"
 	last_sent_facing = ""
+	local_stamina = MAX_STAMINA
+	local_is_sprinting = false
 	world_view.reset_camera()
+	_update_stamina_ui()
 	_update_action_ui()
 	_refresh_debug_info()
 
@@ -572,6 +611,10 @@ func _detach_room_runtime() -> void:
 	held_move_direction = Vector2.ZERO
 	last_cardinal_direction = Vector2.ZERO
 	move_cooldown_remaining = 0.0
+	local_stamina = MAX_STAMINA
+	local_is_sprinting = false
+	_update_stamina_ui()
+	_update_action_ui()
 
 func _set_connection_state(next_state: int, detail: String = "") -> void:
 	connection_state = next_state
@@ -766,6 +809,9 @@ func _store_local_player_identity(player_id: String, player: Player, is_new_avat
 	local_session_id = str(player.sessionId)
 	local_facing = _normalize_player_facing(player)
 	last_sent_facing = local_facing
+	local_stamina = _normalize_player_stamina(player)
+	local_is_sprinting = _normalize_player_sprinting(player)
+	_update_stamina_ui()
 	var server_position := Vector2(player.x, player.y)
 	current_player_name = _display_player_name(player)
 
@@ -774,11 +820,11 @@ func _store_local_player_identity(player_id: String, player: Player, is_new_avat
 		local_authoritative_position = server_position
 		local_pending_steps.clear()
 		local_position = server_position
-		_set_avatar_target(player_id, server_position, true)
+		_set_avatar_target(player_id, server_position, true, _transition_duration_for_player(player))
 		world_view.set_camera_target(server_position, true)
 		return
 
-	_reconcile_local_authoritative_position(player_id, server_position)
+	_reconcile_local_authoritative_position(player_id, player, server_position)
 
 func _display_player_name_from_id(player_id: String) -> String:
 	var avatar = avatars.get(player_id)
@@ -803,16 +849,18 @@ func _handle_grid_movement_input() -> void:
 	var held_direction := _read_current_grid_direction()
 	if held_direction == Vector2.ZERO:
 		held_move_direction = Vector2.ZERO
+		local_is_sprinting = false
 		return
 
 	held_move_direction = held_direction
 	_apply_facing_from_direction(held_direction)
+	var wants_sprint := _wants_sprint()
 
 	if move_cooldown_remaining > 0.0:
 		return
 
-	_send_grid_move(held_direction)
-	move_cooldown_remaining = _grid_move_repeat_seconds()
+	_send_grid_move(held_direction, wants_sprint)
+	move_cooldown_remaining = _grid_move_repeat_seconds(wants_sprint)
 
 func _read_current_grid_direction() -> Vector2:
 	var diagonal_direction := _read_explicit_diagonal_direction()
@@ -870,15 +918,16 @@ func _read_just_pressed_cardinal_direction() -> Vector2:
 		return Vector2.DOWN
 	return Vector2.ZERO
 
-func _send_grid_move(direction: Vector2) -> void:
+func _send_grid_move(direction: Vector2, is_sprinting := false) -> void:
 	if room == null or not room.has_joined():
 		return
 
-	_predict_local_grid_move(direction)
+	_predict_local_grid_move(direction, is_sprinting)
 
 	room.send("move", {
 		"x": int(direction.x),
 		"y": int(direction.y),
+		"sprint": is_sprinting,
 	})
 
 func _smooth_avatar_positions(delta: float) -> void:
@@ -892,7 +941,8 @@ func _smooth_avatar_positions(delta: float) -> void:
 
 		var target_position: Vector2 = avatar_target_positions[player_id]
 		var step_distance: float = avatar_step_distances.get(player_id, WorldConfig.cell_size())
-		var transition_speed := step_distance / _cell_transition_duration()
+		var transition_duration: float = avatar_step_durations.get(player_id, _cell_transition_duration())
+		var transition_speed := step_distance / maxf(transition_duration, 0.001)
 		var is_moving := avatar.position.distance_to(target_position) > 1.0
 		avatar.position = avatar.position.move_toward(target_position, transition_speed * delta)
 
@@ -903,7 +953,7 @@ func _smooth_avatar_positions(delta: float) -> void:
 		if avatar.has_method("set_moving"):
 			avatar.set_moving(is_moving)
 
-func _predict_local_grid_move(direction: Vector2) -> void:
+func _predict_local_grid_move(direction: Vector2, is_sprinting := false) -> void:
 	if local_player_id.is_empty() or not avatars.has(local_player_id):
 		return
 
@@ -914,7 +964,8 @@ func _predict_local_grid_move(direction: Vector2) -> void:
 
 	local_pending_steps.append(direction)
 	local_position = predicted_position
-	_set_avatar_target(local_player_id, predicted_position)
+	local_is_sprinting = is_sprinting
+	_set_avatar_target(local_player_id, predicted_position, false, _cell_transition_duration(is_sprinting))
 
 func _sync_camera_to_local_avatar() -> void:
 	if local_player_id.is_empty():
@@ -975,13 +1026,13 @@ func _run_auto_connect_retry() -> void:
 	else:
 		_show_auth_gate("Войдите по почте и паролю.")
 
-func _reconcile_local_authoritative_position(player_id: String, server_position: Vector2) -> void:
+func _reconcile_local_authoritative_position(player_id: String, player: Player, server_position: Vector2) -> void:
 	if not has_local_authoritative_position:
 		has_local_authoritative_position = true
 		local_authoritative_position = server_position
 		local_pending_steps.clear()
 		local_position = server_position
-		_set_avatar_target(player_id, server_position, true)
+		_set_avatar_target(player_id, server_position, true, _transition_duration_for_player(player))
 		return
 
 	if _is_same_grid_position(server_position, local_authoritative_position):
@@ -1005,12 +1056,12 @@ func _reconcile_local_authoritative_position(player_id: String, server_position:
 			local_pending_steps.remove_at(0)
 
 		local_position = _build_predicted_local_position()
-		_set_avatar_target(player_id, local_position)
+		_set_avatar_target(player_id, local_position, false, _transition_duration_for_player(player))
 		return
 
 	local_pending_steps.clear()
 	local_position = server_position
-	_set_avatar_target(player_id, server_position)
+	_set_avatar_target(player_id, server_position, false, _transition_duration_for_player(player))
 
 func _build_predicted_local_position() -> Vector2:
 	var predicted_position := local_authoritative_position
@@ -1021,6 +1072,38 @@ func _build_predicted_local_position() -> Vector2:
 func _is_same_grid_position(a: Vector2, b: Vector2) -> bool:
 	return a.distance_to(b) <= GRID_POSITION_EPSILON
 
+func _normalize_player_stamina(player: Player) -> float:
+	if player == null:
+		return MAX_STAMINA
+
+	return clampf(float(player.stamina), 0.0, MAX_STAMINA)
+
+func _normalize_player_sprinting(player: Player) -> bool:
+	return player != null and bool(player.sprinting) and _normalize_player_stamina(player) > 0.0
+
+func _transition_duration_for_player(player: Player) -> float:
+	return _cell_transition_duration(_normalize_player_sprinting(player))
+
+func _wants_sprint() -> bool:
+	return Input.is_action_pressed(MOVE_SPRINT_ACTION) and local_stamina >= MIN_STAMINA_TO_SPRINT
+
+func _update_stamina_ui() -> void:
+	if stamina_hud == null or stamina_label == null or stamina_bar == null:
+		return
+
+	var clamped_stamina := clampf(local_stamina, 0.0, MAX_STAMINA)
+	stamina_bar.min_value = 0.0
+	stamina_bar.max_value = MAX_STAMINA
+	stamina_bar.value = clamped_stamina
+	stamina_label.text = "Stamina %d%%" % int(round(clamped_stamina))
+
+	if clamped_stamina <= 20.0:
+		stamina_bar.modulate = Color(0.96, 0.45, 0.38, 1.0)
+	elif clamped_stamina <= 45.0:
+		stamina_bar.modulate = Color(0.94, 0.77, 0.39, 1.0)
+	else:
+		stamina_bar.modulate = Color(0.78, 0.91, 0.67, 1.0)
+
 func _ensure_move_input_actions() -> void:
 	_ensure_move_input_action(MOVE_UP_ACTION, [Key.KEY_W])
 	_ensure_move_input_action(MOVE_DOWN_ACTION, [Key.KEY_S])
@@ -1030,6 +1113,7 @@ func _ensure_move_input_actions() -> void:
 	_ensure_move_input_action(MOVE_UP_RIGHT_ACTION, [Key.KEY_E])
 	_ensure_move_input_action(MOVE_DOWN_LEFT_ACTION, [Key.KEY_Z])
 	_ensure_move_input_action(MOVE_DOWN_RIGHT_ACTION, [Key.KEY_X])
+	_ensure_modifier_input_action(MOVE_SPRINT_ACTION, [Key.KEY_SHIFT])
 
 func _ensure_move_input_action(action_name: StringName, physical_keys: Array) -> void:
 	if not InputMap.has_action(action_name):
@@ -1048,6 +1132,23 @@ func _ensure_move_input_action(action_name: StringName, physical_keys: Array) ->
 		input_event.physical_keycode = int(physical_key)
 		InputMap.action_add_event(action_name, input_event)
 
+func _ensure_modifier_input_action(action_name: StringName, key_codes: Array) -> void:
+	if not InputMap.has_action(action_name):
+		InputMap.add_action(action_name)
+
+	var existing_keys := {}
+	for event in InputMap.action_get_events(action_name):
+		if event is InputEventKey:
+			existing_keys[int(event.keycode)] = true
+
+	for key_code in key_codes:
+		if existing_keys.has(int(key_code)):
+			continue
+
+		var input_event := InputEventKey.new()
+		input_event.keycode = int(key_code)
+		InputMap.action_add_event(action_name, input_event)
+
 func _configure_auth_ui() -> void:
 	auth_overlay.visible = false
 	auth_title_label.text = "Вход в игру"
@@ -1064,6 +1165,12 @@ func _configure_auth_ui() -> void:
 
 func _configure_action_ui() -> void:
 	action_overlay.visible = false
+	action_bottom_center.visible = false
+	stamina_hud.visible = false
+	stamina_label.text = "Stamina 100%"
+	stamina_bar.show_percentage = false
+	stamina_bar.value = MAX_STAMINA
+	_update_stamina_ui()
 	search_prey_button.text = "Искать дичь"
 	search_prey_button.pressed.connect(_on_search_prey_pressed)
 
@@ -1072,15 +1179,14 @@ func _update_world_actions() -> void:
 	_update_action_ui()
 
 func _update_action_ui() -> void:
-	var can_show := (
-		active_prey_search_zone != null
-		and room != null
-		and room.has_joined()
-		and not auth_overlay.visible
-	)
-	action_overlay.visible = can_show
+	var has_world_runtime := room != null and room.has_joined() and not auth_overlay.visible
+	var can_show_search := has_world_runtime and active_prey_search_zone != null
+	var can_show_stamina := has_world_runtime and not local_player_id.is_empty()
+	action_bottom_center.visible = can_show_search
+	stamina_hud.visible = can_show_stamina
+	action_overlay.visible = can_show_search or can_show_stamina
 
-	if not can_show:
+	if not can_show_search:
 		search_prey_button.tooltip_text = ""
 		return
 
@@ -1159,6 +1265,7 @@ func _refresh_auth_copy() -> void:
 
 func _show_auth_gate(message := "") -> void:
 	auth_overlay.visible = true
+	_update_action_ui()
 	_set_auth_controls_enabled(not auth_login_in_progress and not is_connecting and room == null)
 	if not message.is_empty():
 		_set_auth_status(message)
@@ -1170,6 +1277,7 @@ func _show_auth_gate(message := "") -> void:
 func _hide_auth_gate() -> void:
 	auth_overlay.visible = false
 	auth_status_label.text = ""
+	_update_action_ui()
 
 func _set_auth_controls_enabled(is_enabled: bool) -> void:
 	auth_email_input.editable = is_enabled

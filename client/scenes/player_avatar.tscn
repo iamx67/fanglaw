@@ -1,62 +1,45 @@
-[gd_scene load_steps=9 format=3]
+[gd_scene load_steps=2 format=3]
 
 [ext_resource type="Script" path="res://scripts/cat_avatar.gd" id="1_avatar"]
-[ext_resource type="Texture2D" path="res://assets/characters/body/body_base.png" id="2_body"]
-[ext_resource type="Texture2D" path="res://assets/characters/patterns/pattern_01.png" id="3_pattern_01"]
-[ext_resource type="Texture2D" path="res://assets/characters/eyes/eyes_base.png" id="4_eyes_base"]
-[ext_resource type="Texture2D" path="res://assets/characters/eyes/eyes_iris.png" id="5_eyes_iris"]
-[ext_resource type="Texture2D" path="res://assets/characters/patterns/pattern_02.png" id="6_pattern_02"]
-[ext_resource type="Texture2D" path="res://assets/characters/patterns/pattern_03.png" id="7_pattern_03"]
-[ext_resource type="Texture2D" path="res://assets/characters/patterns/pattern_04.png" id="8_pattern_04"]
 
 [node name="PlayerAvatar" type="Node2D"]
 script = ExtResource("1_avatar")
-idle_texture = ExtResource("2_body")
-walk_texture = ExtResource("2_body")
-body_texture = ExtResource("2_body")
-eyes_base_texture = ExtResource("4_eyes_base")
-eyes_iris_texture = ExtResource("5_eyes_iris")
-pattern_01_enabled = true
-pattern_02_enabled = false
-pattern_03_enabled = false
-pattern_04_enabled = false
-fur_color = Color(1, 1, 1, 1)
-pattern_01_color = Color(1, 1, 1, 1)
-pattern_02_color = Color(1, 1, 1, 1)
-pattern_03_color = Color(1, 1, 1, 1)
-pattern_04_color = Color(1, 1, 1, 1)
-eye_color = Color(1, 1, 1, 1)
+texture_filter = 4
 
 [node name="CharacterRoot" type="Node2D" parent="."]
 position = Vector2(0, -144)
 scale = Vector2(0.88, 0.88)
+texture_filter = 4
 
-[node name="BodySprite" type="Sprite2D" parent="CharacterRoot"]
-texture = ExtResource("2_body")
+[node name="TailBaseSprite" type="Sprite2D" parent="CharacterRoot"]
 
-[node name="PatternSprite01" type="Sprite2D" parent="CharacterRoot"]
-texture = ExtResource("3_pattern_01")
+[node name="TailPatternLayer" type="Node2D" parent="CharacterRoot"]
 
-[node name="PatternSprite02" type="Sprite2D" parent="CharacterRoot"]
-visible = false
-texture = ExtResource("6_pattern_02")
+[node name="TailShadowSprite" type="Sprite2D" parent="CharacterRoot"]
 
-[node name="PatternSprite03" type="Sprite2D" parent="CharacterRoot"]
-visible = false
-texture = ExtResource("7_pattern_03")
+[node name="TailContourSprite" type="Sprite2D" parent="CharacterRoot"]
 
-[node name="PatternSprite04" type="Sprite2D" parent="CharacterRoot"]
-visible = false
-texture = ExtResource("8_pattern_04")
+[node name="BodyBaseSprite" type="Sprite2D" parent="CharacterRoot"]
+
+[node name="BodyPatternLayer" type="Node2D" parent="CharacterRoot"]
 
 [node name="EyesBaseSprite" type="Sprite2D" parent="CharacterRoot"]
-texture = ExtResource("4_eyes_base")
 
-[node name="EyesIrisSprite" type="Sprite2D" parent="CharacterRoot"]
-texture = ExtResource("5_eyes_iris")
+[node name="NoseSprite" type="Sprite2D" parent="CharacterRoot"]
 
-[node name="AccessorySprite" type="Sprite2D" parent="CharacterRoot"]
-visible = false
+[node name="BodyShadowSprite" type="Sprite2D" parent="CharacterRoot"]
+
+[node name="BodyContourSprite" type="Sprite2D" parent="CharacterRoot"]
+
+[node name="CheeksSprite" type="Sprite2D" parent="CharacterRoot"]
+
+[node name="ManeBaseSprite" type="Sprite2D" parent="CharacterRoot"]
+
+[node name="ManeContourSprite" type="Sprite2D" parent="CharacterRoot"]
+
+[node name="EarsBaseSprite" type="Sprite2D" parent="CharacterRoot"]
+
+[node name="EarsContourSprite" type="Sprite2D" parent="CharacterRoot"]
 
 [node name="TagLabel" type="Label" parent="."]
 offset_left = -48.0
