@@ -2,8 +2,25 @@
 
 [ext_resource type="Script" uid="uid://bk7j2umdlj02g" path="res://scripts/main.gd" id="1_main"]
 [ext_resource type="PackedScene" uid="uid://15rx66h2bq5e" path="res://world_view.tscn" id="2_world_view"]
-[ext_resource type="PackedScene" uid="uid://co5c1sh445lo1" path="res://scenes/world_blocker.tscn" id="3_h2yge"]
 [ext_resource type="PackedScene" path="res://scenes/prey_search_zone.tscn" id="4_1bvp3"]
+[ext_resource type="PackedScene" path="res://scenes/bush.tscn" id="4_7mycd"]
+[ext_resource type="Texture2D" uid="uid://6x1sgp27k4xh" path="res://assets/creatures/mouse1.png" id="5_lquwl"]
+[ext_resource type="Texture2D" uid="uid://cw7dgjir3g0y0" path="res://assets/environment/brevno.png" id="6_4c57u"]
+[ext_resource type="Texture2D" uid="uid://cipmkbclq3wjy" path="res://assets/environment/bub.png" id="7_4c57u"]
+[ext_resource type="Texture2D" uid="uid://cqqo105ahnld6" path="res://assets/environment/ozero1.png" id="7_dg77c"]
+[ext_resource type="PackedScene" uid="uid://co5c1sh445lo1" path="res://scenes/world_blocker.tscn" id="7_efxa6"]
+[ext_resource type="Texture2D" uid="uid://ccvtu2lh6cok3" path="res://assets/backgrounds/jija.png" id="9_dg77c"]
+
+[sub_resource type="TileSetAtlasSource" id="TileSetAtlasSource_ycdy4"]
+texture = ExtResource("9_dg77c")
+texture_region_size = Vector2i(1024, 936)
+28:24/0 = 0
+0:13/0 = 0
+0:0/0 = 0
+
+[sub_resource type="TileSet" id="TileSet_w48qg"]
+tile_size = Vector2i(1024, 936)
+sources/0 = SubResource("TileSetAtlasSource_ycdy4")
 
 [node name="Main" type="Control" unique_id=1359710790]
 layout_mode = 3
@@ -15,26 +32,147 @@ grow_vertical = 2
 script = ExtResource("1_main")
 
 [node name="WorldView" parent="." unique_id=1976402734 instance=ExtResource("2_world_view")]
+camera_zoom_min = null
+camera_zoom_max = null
+camera_zoom_step = null
 
-[node name="Blockers" parent="WorldView" index="5" unique_id=273289115]
+[node name="PlayerPreview" parent="WorldView/DepthObjects" parent_id_path=PackedInt32Array(1976402734, 857034952) index="0" unique_id=333606162]
+pattern_01_enabled = false
+pattern_02_enabled = true
+pattern_03_enabled = true
+fur_color = Color(0.2819191, 0.28191918, 0.28191897, 1)
+pattern_02_color = Color(0.5037687, 0.5037684, 0.5037685, 1)
+pattern_03_color = Color(0.3019608, 0.29803923, 0.28235295, 1)
+eye_color = Color(0.5623429, 0.08591739, 0.350751, 1)
+
+[node name="BodySprite" parent="WorldView/DepthObjects/PlayerPreview/CharacterRoot" index="0"]
+modulate = Color(0.2819191, 0.28191918, 0.28191897, 1)
+
+[node name="PatternSprite01" parent="WorldView/DepthObjects/PlayerPreview/CharacterRoot" index="1"]
+visible = false
+
+[node name="PatternSprite02" parent="WorldView/DepthObjects/PlayerPreview/CharacterRoot" index="2"]
+visible = true
+modulate = Color(0.5037687, 0.5037684, 0.5037685, 1)
+
+[node name="PatternSprite03" parent="WorldView/DepthObjects/PlayerPreview/CharacterRoot" index="3"]
+visible = true
+modulate = Color(0.3019608, 0.29803923, 0.28235295, 1)
+
+[node name="EyesIrisSprite" parent="WorldView/DepthObjects/PlayerPreview/CharacterRoot" index="6"]
+modulate = Color(0.5623429, 0.08591739, 0.350751, 1)
+
+[node name="Sprite2D" parent="WorldView/DepthObjects/PreyPreview/VisualRoot" parent_id_path=PackedInt32Array(1976402734, 1611461697, 1269698390) index="0" unique_id=1774885751]
+texture = ExtResource("5_lquwl")
+
+[node name="Bush" parent="WorldView/DepthObjects" parent_id_path=PackedInt32Array(1976402734, 857034952) index="3" unique_id=1212934850 instance=ExtResource("4_7mycd")]
+position = Vector2(-119, -686)
+scale = Vector2(1.8663838, 1.803393)
+
+[node name="brevno" parent="WorldView/DepthObjects" parent_id_path=PackedInt32Array(1976402734, 857034952) index="4" unique_id=1811454467 instance=ExtResource("4_7mycd")]
+position = Vector2(-2774, 94.999985)
+scale = Vector2(3.4833884, 3.2522264)
+bush_texture = ExtResource("6_4c57u")
+
+[node name="derevo" parent="WorldView/DepthObjects" parent_id_path=PackedInt32Array(1976402734, 857034952) index="5" unique_id=500436415 instance=ExtResource("4_7mycd")]
+position = Vector2(6384, 1660)
+scale = Vector2(5.0241914, 4.3794937)
+bush_texture = ExtResource("7_4c57u")
+
+[node name="ozero" parent="WorldView/Map" parent_id_path=PackedInt32Array(1976402734, 829624274) index="0" unique_id=1698784775 instance=ExtResource("4_7mycd")]
+position = Vector2(3325.0002, 1301)
+scale = Vector2(3.4833884, 3.2522264)
+bush_texture = ExtResource("7_dg77c")
+
+[node name="Blockers" parent="WorldView" index="4" unique_id=273289115]
 position = Vector2(-136, 61)
 
-[node name="WorldBlocker" parent="WorldView/Blockers" index="0" unique_id=152193576 instance=ExtResource("3_h2yge")]
-position = Vector2(41790, -131)
-blocker_size = Vector2(300, 32)
+[node name="WorldBlocker" parent="WorldView/Blockers" index="0" unique_id=1778780521 instance=ExtResource("7_efxa6")]
+position = Vector2(3458, -76)
+blocker_size = Vector2(2200, 1100)
+
+[node name="WorldBlocker2" parent="WorldView/Blockers" index="1" unique_id=1319060891 instance=ExtResource("7_efxa6")]
+position = Vector2(2185, -307)
+blocker_size = Vector2(200, 200)
+
+[node name="WorldBlocker3" parent="WorldView/Blockers" index="2" unique_id=1698867156 instance=ExtResource("7_efxa6")]
+position = Vector2(2184, -53)
+blocker_size = Vector2(200, 200)
+
+[node name="WorldBlocker5" parent="WorldView/Blockers" index="3" unique_id=1094386751 instance=ExtResource("7_efxa6")]
+position = Vector2(2955, -724)
+blocker_size = Vector2(200, 200)
+
+[node name="WorldBlocker6" parent="WorldView/Blockers" index="4" unique_id=1939357047 instance=ExtResource("7_efxa6")]
+position = Vector2(3216, -736)
+blocker_size = Vector2(200, 200)
+
+[node name="WorldBlocker7" parent="WorldView/Blockers" index="5" unique_id=919583048 instance=ExtResource("7_efxa6")]
+position = Vector2(3462, -742)
+blocker_size = Vector2(200, 200)
+
+[node name="WorldBlocker8" parent="WorldView/Blockers" index="6" unique_id=1113313195 instance=ExtResource("7_efxa6")]
+position = Vector2(3705, -724)
+blocker_size = Vector2(200, 200)
+
+[node name="WorldBlocker9" parent="WorldView/Blockers" index="7" unique_id=1187417110 instance=ExtResource("7_efxa6")]
+position = Vector2(3945, -718)
+blocker_size = Vector2(200, 200)
+
+[node name="WorldBlocker10" parent="WorldView/Blockers" index="8" unique_id=767608238 instance=ExtResource("7_efxa6")]
+position = Vector2(4677, -299)
+blocker_size = Vector2(200, 200)
+
+[node name="WorldBlocker11" parent="WorldView/Blockers" index="9" unique_id=1140300701 instance=ExtResource("7_efxa6")]
+position = Vector2(4665, -59)
+blocker_size = Vector2(200, 200)
+
+[node name="WorldBlocker12" parent="WorldView/Blockers" index="10" unique_id=974233849 instance=ExtResource("7_efxa6")]
+position = Vector2(4674, 187)
+blocker_size = Vector2(200, 200)
+
+[node name="WorldBlocker13" parent="WorldView/Blockers" index="11" unique_id=2119602695 instance=ExtResource("7_efxa6")]
+position = Vector2(3726, 606)
+blocker_size = Vector2(200, 200)
+
+[node name="WorldBlocker14" parent="WorldView/Blockers" index="12" unique_id=1351214720 instance=ExtResource("7_efxa6")]
+position = Vector2(3459, 615)
+blocker_size = Vector2(200, 200)
+
+[node name="WorldBlocker15" parent="WorldView/Blockers" index="13" unique_id=84912306 instance=ExtResource("7_efxa6")]
+position = Vector2(3210, 612)
+blocker_size = Vector2(200, 200)
+
+[node name="WorldBlocker16" parent="WorldView/Blockers" index="14" unique_id=1337099513 instance=ExtResource("7_efxa6")]
+position = Vector2(2949, 576)
+blocker_size = Vector2(200, 200)
+
+[node name="WorldBlocker4" parent="WorldView/Blockers" index="15" unique_id=1776371940 instance=ExtResource("7_efxa6")]
+position = Vector2(2178, 201)
+blocker_size = Vector2(200, 200)
 
 [node name="PreySearchZone" parent="WorldView/PreySearchZones" parent_id_path=PackedInt32Array(1976402734, 1280456051) index="0" unique_id=1719463368 instance=ExtResource("4_1bvp3")]
-position = Vector2(41657, -160)
+position = Vector2(-183, -898)
 collision_layer = 0
 collision_mask = 0
 monitoring = false
 monitorable = false
 spawn_tag = "bushes "
-zone_size = Vector2(256, 180)
+zone_size = Vector2(300, 300)
 
-[node name="bushes" parent="WorldView" index="14" unique_id=1469407261]
-position = Vector2(5, -33)
-tile_map_data = PackedByteArray("AAD///3/AAAAAAAAAAADAAAAAAAAAAAAAAD7//3/AAAAAAAAAAD8/wQAAAAAAAAAAAAGAAYAAAAAAAAAAAAFAPn/AAAAAAAAAAD5//n/AAAAAAAAAABqAPr/AAAAAAAAAABqAAQAAAAAAAAAAABpAP//AAAAAAAAAAA=")
+[node name="grass" parent="WorldView" index="10" unique_id=381891270]
+tile_map_data = PackedByteArray("AAD/////AAAAAAAAAAAAAP//AAAAAAAAAAD//wAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAP//AAAAAAAAAAABAAAAAAAAAAAAAAACAAAAAAAAAAAAAAACAP//AAAAAAAAAAD+////AAAAAAAAAAD+/wAAAAAAAAAAAAD9/wAAAAAAAAAAAAD9////AAAAAAAAAAD9//7/AAAAAAAAAAD+//7/AAAAAAAAAAD///7/AAAAAAAAAAAAAP7/AAAAAAAAAAABAP7/AAAAAAAAAAACAP7/AAAAAAAAAAACAAEAAAAAAAAAAAABAAEAAAAAAAAAAAAAAAEAAAAAAAAAAAD//wEAAAAAAAAAAAD+/wEAAAAAAAAAAAD9/wEAAAAAAAAAAAADAP7/AAAAAAAAAAADAP//AAAAAAAAAAADAAAAAAAAAAAAAAADAAEAAAAAAAAAAAAEAP7/AAAAAAAAAAAEAP//AAAAAAAAAAAEAAAAAAAAAAAAAAAEAAEAAAAAAAAAAAAFAP7/AAAAAAAAAAAFAP//AAAAAAAAAAAFAAAAAAAAAAAAAAAFAAEAAAAAAAAAAAAGAP7/AAAAAAAAAAAGAP//AAAAAAAAAAAGAAAAAAAAAAAAAAAGAAEAAAAAAAAAAAAHAP7/AAAAAAAAAAAHAP//AAAAAAAAAAAHAAAAAAAAAAAAAAAHAAEAAAAAAAAAAAAIAP7/AAAAAAAAAAAIAP//AAAAAAAAAAAIAAAAAAAAAAAAAAAIAAEAAAAAAAAAAAAJAP7/AAAAAAAAAAAJAP//AAAAAAAAAAAJAAAAAAAAAAAAAAAJAAEAAAAAAAAAAAAKAP7/AAAAAAAAAAAKAP//AAAAAAAAAAAKAAAAAAAAAAAAAAAKAAEAAAAAAAAAAAALAP7/AAAAAAAAAAALAP//AAAAAAAAAAALAAEAAAAAAAAAAAAMAP7/AAAAAAAAAAAMAP//AAAAAAAAAAAMAAEAAAAAAAAAAAANAP7/AAAAAAAAAAANAP//AAAAAAAAAAANAAAAAAAAAAAAAAANAAEAAAAAAAAAAAAOAP7/AAAAAAAAAAAOAP//AAAAAAAAAAAOAAAAAAAAAAAAAAAOAAEAAAAAAAAAAAAPAP7/AAAAAAAAAAAPAP//AAAAAAAAAAAPAAAAAAAAAAAAAAAPAAEAAAAAAAAAAAD8//7/AAAAAAAAAAD8////AAAAAAAAAAD8/wAAAAAAAAAAAAD8/wEAAAAAAAAAAAD7/wEAAAAAAAAAAAD7/wAAAAAAAAAAAAD7////AAAAAAAAAAD7//7/AAAAAAAAAAD6//7/AAAAAAAAAAD6////AAAAAAAAAAD6//3/AAAAAAAAAAD7//3/AAAAAAAAAAD8//3/AAAAAAAAAAD9//3/AAAAAAAAAAD+//3/AAAAAAAAAAD///3/AAAAAAAAAAA=")
+
+[node name="WorldGrid" parent="WorldView" index="11" unique_id=1733447014]
+line_alpha = 0.1
+major_line_alpha = 0.3
+super_major_line_alpha = 0.45
+axis_alpha = 0.6
+border_alpha = 0.45
+
+[node name="TileMapLayer" type="TileMapLayer" parent="WorldView" unique_id=1663391975]
+tile_map_data = PackedByteArray("AACg/h0AAAAAAAAAAABg/h0AAAAAAAAAAABg/lcAAAAAAAAAAAD6/wAAAAAAAAAAAAD5/wAAAAAAAAAAAAD4/wAAAAAAAAAAAAD4////AAAAAAAAAAD5////AAAAAAAAAAD5//7/AAAAAAAAAAD4//7/AAAAAAAAAAD4//3/AAAAAAAAAAD5//3/AAAAAAAAAAD6/wEAAAAAAAAAAAD5/wEAAAAAAAAAAAD4/wEAAAAAAAAAAAD4/wIAAAAAAAAAAAD5/wIAAAAAAAAAAAD6/wIAAAAAAAAAAAD7/wIAAAAAAAAAAAD8/wIAAAAAAAAAAAA=")
+tile_set = SubResource("TileSet_w48qg")
 
 [node name="ActionLayer" type="CanvasLayer" parent="." unique_id=109087741]
 layer = 5
@@ -147,3 +285,6 @@ autowrap_mode = 3
 [node name="AuthRequest" type="HTTPRequest" parent="." unique_id=1582796896]
 
 [editable path="WorldView"]
+[editable path="WorldView/DepthObjects/PlayerPreview"]
+[editable path="WorldView/DepthObjects/BushPreview"]
+[editable path="WorldView/DepthObjects/PreyPreview"]

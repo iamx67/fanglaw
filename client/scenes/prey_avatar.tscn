@@ -1,18 +1,15 @@
-[gd_scene load_steps=2 format=3]
+[gd_scene format=3 uid="uid://fwwvh7fopdwk"]
 
-[ext_resource type="Script" path="res://scripts/prey_avatar.gd" id="1_prey_avatar"]
+[ext_resource type="Script" uid="uid://dyf0nu3u0b1ad" path="res://scripts/prey_avatar.gd" id="1_prey_avatar"]
 
-[node name="PreyAvatar" type="Node2D"]
+[sub_resource type="CompressedTexture2D" id="CompressedTexture2D_cmh5h"]
+load_path = "res://.godot/imported/mouse.png-9b7799c3220c8fe6be2d4290858b66e0.ctex"
+
+[node name="PreyAvatar" type="Node2D" unique_id=1316522210]
 script = ExtResource("1_prey_avatar")
 
-[node name="VisualRoot" type="Node2D" parent="."]
+[node name="VisualRoot" type="Node2D" parent="." unique_id=1269698390]
 
-[node name="Placeholder" type="Node2D" parent="VisualRoot"]
-
-[node name="Glow" type="Polygon2D" parent="VisualRoot/Placeholder"]
-polygon = PackedVector2Array(0, -18, 24, 0, 0, 18, -24, 0)
-color = Color(1, 0.847059, 0.364706, 0.2)
-
-[node name="Body" type="Polygon2D" parent="VisualRoot/Placeholder"]
-polygon = PackedVector2Array(0, -12, 18, 0, 0, 12, -18, 0)
-color = Color(0.552941, 0.431373, 0.388235, 1)
+[node name="Sprite2D" type="Sprite2D" parent="VisualRoot" unique_id=1774885751]
+scale = Vector2(1, 1)
+texture = SubResource("CompressedTexture2D_cmh5h")

@@ -1,33 +1,76 @@
-[gd_scene load_steps=3 format=3]
+[gd_scene load_steps=9 format=3]
 
 [ext_resource type="Script" path="res://scripts/cat_avatar.gd" id="1_avatar"]
-[ext_resource type="Texture2D" path="res://icon.svg" id="2_placeholder"]
+[ext_resource type="Texture2D" path="res://assets/characters/body/body_base.png" id="2_body"]
+[ext_resource type="Texture2D" path="res://assets/characters/patterns/pattern_01.png" id="3_pattern_01"]
+[ext_resource type="Texture2D" path="res://assets/characters/eyes/eyes_base.png" id="4_eyes_base"]
+[ext_resource type="Texture2D" path="res://assets/characters/eyes/eyes_iris.png" id="5_eyes_iris"]
+[ext_resource type="Texture2D" path="res://assets/characters/patterns/pattern_02.png" id="6_pattern_02"]
+[ext_resource type="Texture2D" path="res://assets/characters/patterns/pattern_03.png" id="7_pattern_03"]
+[ext_resource type="Texture2D" path="res://assets/characters/patterns/pattern_04.png" id="8_pattern_04"]
 
 [node name="PlayerAvatar" type="Node2D"]
 script = ExtResource("1_avatar")
-idle_texture = ExtResource("2_placeholder")
-walk_texture = ExtResource("2_placeholder")
+idle_texture = ExtResource("2_body")
+walk_texture = ExtResource("2_body")
+body_texture = ExtResource("2_body")
+eyes_base_texture = ExtResource("4_eyes_base")
+eyes_iris_texture = ExtResource("5_eyes_iris")
+pattern_01_enabled = true
+pattern_02_enabled = false
+pattern_03_enabled = false
+pattern_04_enabled = false
+fur_color = Color(1, 1, 1, 1)
+pattern_01_color = Color(1, 1, 1, 1)
+pattern_02_color = Color(1, 1, 1, 1)
+pattern_03_color = Color(1, 1, 1, 1)
+pattern_04_color = Color(1, 1, 1, 1)
+eye_color = Color(1, 1, 1, 1)
 
 [node name="CharacterRoot" type="Node2D" parent="."]
+position = Vector2(0, -144)
+scale = Vector2(0.88, 0.88)
 
-[node name="Sprite2D" type="Sprite2D" parent="CharacterRoot"]
-position = Vector2(0, -36)
-scale = Vector2(0.18, 0.18)
-texture = ExtResource("2_placeholder")
+[node name="BodySprite" type="Sprite2D" parent="CharacterRoot"]
+texture = ExtResource("2_body")
+
+[node name="PatternSprite01" type="Sprite2D" parent="CharacterRoot"]
+texture = ExtResource("3_pattern_01")
+
+[node name="PatternSprite02" type="Sprite2D" parent="CharacterRoot"]
+visible = false
+texture = ExtResource("6_pattern_02")
+
+[node name="PatternSprite03" type="Sprite2D" parent="CharacterRoot"]
+visible = false
+texture = ExtResource("7_pattern_03")
+
+[node name="PatternSprite04" type="Sprite2D" parent="CharacterRoot"]
+visible = false
+texture = ExtResource("8_pattern_04")
+
+[node name="EyesBaseSprite" type="Sprite2D" parent="CharacterRoot"]
+texture = ExtResource("4_eyes_base")
+
+[node name="EyesIrisSprite" type="Sprite2D" parent="CharacterRoot"]
+texture = ExtResource("5_eyes_iris")
+
+[node name="AccessorySprite" type="Sprite2D" parent="CharacterRoot"]
+visible = false
 
 [node name="TagLabel" type="Label" parent="."]
 offset_left = -48.0
-offset_top = -112.0
+offset_top = -244.0
 offset_right = 48.0
-offset_bottom = -94.0
+offset_bottom = -226.0
 theme_override_font_sizes/font_size = 11
 horizontal_alignment = 1
 text = "YOU"
 
 [node name="NameLabel" type="Label" parent="."]
 offset_left = -96.0
-offset_top = 18.0
+offset_top = 52.0
 offset_right = 96.0
-offset_bottom = 36.0
+offset_bottom = 70.0
 horizontal_alignment = 1
 text = "Cat"

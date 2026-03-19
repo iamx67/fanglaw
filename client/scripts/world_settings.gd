@@ -4,17 +4,17 @@ extends Node
 
 const EXPORT_PATH := "res://data/world_config.json"
 
-@export_range(1.0, 1024.0, 1.0) var cell_size := 64.0:
+@export_range(1.0, 1024.0, 1.0) var cell_size := 256.0:
 	set(value):
 		cell_size = maxf(1.0, value)
 		_export_if_changed()
 
-@export_range(1.0, 5000.0, 1.0) var world_half_width_cells := 667.0:
+@export_range(1.0, 5000.0, 1.0) var world_half_width_cells := 62.0:
 	set(value):
 		world_half_width_cells = maxf(1.0, value)
 		_export_if_changed()
 
-@export_range(1.0, 5000.0, 1.0) var world_half_height_cells := 667.0:
+@export_range(1.0, 5000.0, 1.0) var world_half_height_cells := 62.0:
 	set(value):
 		world_half_height_cells = maxf(1.0, value)
 		_export_if_changed()

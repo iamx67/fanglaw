@@ -14,6 +14,7 @@ import {
 import { AUTH_SCHEMA_SQL } from "../persistence/PostgresAuthStore.js";
 import {
   normalizeStoredAccountType,
+  normalizeStoredFacing,
   normalizeStoredName,
   normalizeStoredNumber,
   normalizeStoredTimestamp,
@@ -288,6 +289,7 @@ function normalizeInputData(authFile: StoredAuthFile, playersFile: StoredPlayers
       name: normalizeStoredName(profile.name),
       x: normalizeStoredNumber(profile.x),
       y: normalizeStoredNumber(profile.y),
+      facing: normalizeStoredFacing(profile.facing),
       createdAt: normalizeStoredTimestamp(profile.createdAt),
       updatedAt: normalizeStoredTimestamp(profile.updatedAt),
     });
@@ -302,6 +304,7 @@ function normalizeInputData(authFile: StoredAuthFile, playersFile: StoredPlayers
         name: character.name,
         x: 0,
         y: 0,
+        facing: "right",
         createdAt: character.createdAt,
         updatedAt: character.updatedAt,
       });

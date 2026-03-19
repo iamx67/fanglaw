@@ -32,9 +32,9 @@ type WorldBlocker = {
   bottom: number;
 };
 
-const DEFAULT_CELL_SIZE = 64;
-const DEFAULT_WORLD_HALF_WIDTH_CELLS = 667;
-const DEFAULT_WORLD_HALF_HEIGHT_CELLS = 667;
+const DEFAULT_CELL_SIZE = 256;
+const DEFAULT_WORLD_HALF_WIDTH_CELLS = 62;
+const DEFAULT_WORLD_HALF_HEIGHT_CELLS = 62;
 const DEFAULT_WALL_THICKNESS = 256;
 const WORLD_CONFIG_FILE = fileURLToPath(new URL("../../../client/data/world_config.json", import.meta.url));
 const WORLD_BLOCKERS_FILE = fileURLToPath(new URL("../../../client/data/world_blockers.json", import.meta.url));

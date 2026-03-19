@@ -4,10 +4,11 @@ import { Player, Prey, WorldState } from "./schema/WorldState.js";
 import { isWalkableWorldPosition, resolveSpawnWorldPosition, snapWorldPosition, worldConfig } from "../config/worldConfig.js";
 import { getPlayerSpawnPoint, getPreySearchZoneById, isWorldPositionInsidePreySearchZone, type PreySearchZone } from "../config/worldAuthoring.js";
 import { AuthStoreError, authStore, type AuthContextData } from "../persistence/AuthStore.js";
-import { playerIdentityStore } from "../persistence/PlayerIdentityStore.js";
+import { playerIdentityStore, type PlayerSnapshot } from "../persistence/PlayerIdentityStore.js";
 
 type JoinOptions = { sessionToken?: string };
 type MoveMessage = { x: number; y: number };
+type FaceMessage = { x: number };
 type SearchPreyMessage = { searchZoneId?: string };
 
 type GridStep = {
@@ -21,7 +22,9 @@ type PreySpawnMeta = {
   maxFleeDistance: number;
 };
 
-const GRID_STEP_COOLDOWN_MS = 160;
+const BASE_GRID_STEP_COOLDOWN_MS = 130;
+const BASE_GRID_TIMING_CELL_SIZE = 64;
+const GRID_TIMING_SCALE_EXPONENT = 0.8;
 const RECONNECT_WINDOW_SECONDS = 20;
 const MAX_ACTIVE_PREY = 64;
 const PREY_MOVE_INTERVAL_MS = 220;
@@ -103,6 +106,27 @@ export class CatRoom extends Room<{ state: WorldState }> {
       this.tryMovePlayer(playerId, player, step);
     });
 
+    this.onMessage("face", (client, message: FaceMessage) => {
+      const playerId = this.sessionToPlayerId.get(client.sessionId);
+      if (!playerId) {
+        return;
+      }
+
+      const player = this.state.players.get(playerId);
+      if (!player || !player.connected) {
+        return;
+      }
+
+      const horizontalFacing = parseHorizontalFacing(message);
+      if (!horizontalFacing) {
+        return;
+      }
+
+      if (this.updatePlayerFacing(player, horizontalFacing)) {
+        playerIdentityStore.savePlayerSnapshot(toPlayerSnapshot(player));
+      }
+    });
+
     this.onMessage("search-prey", (client, message: SearchPreyMessage) => {
       const playerId = this.sessionToPlayerId.get(client.sessionId);
       if (!playerId) {
@@ -146,6 +170,7 @@ export class CatRoom extends Room<{ state: WorldState }> {
     player.name = authData.characterName;
     player.x = spawnPosition.x;
     player.y = spawnPosition.y;
+    player.facing = profile.facing;
     player.connected = true;
 
     this.state.players.set(playerId, player);
@@ -203,10 +228,26 @@ export class CatRoom extends Room<{ state: WorldState }> {
   }
 
   private tryMovePlayer(playerId: string, player: Player, step: GridStep) {
+    let changed = false;
+    if (this.updatePlayerFacing(player, step.x)) {
+      changed = true;
+    }
+
     const lastMoveAt = this.lastMoveAt.get(playerId) ?? 0;
     const now = Date.now();
+    const gridTimingScale = Math.pow(
+      Math.max(worldConfig.gridCellSize / BASE_GRID_TIMING_CELL_SIZE, 0.001),
+      GRID_TIMING_SCALE_EXPONENT,
+    );
+    const gridStepCooldownMs = Math.max(
+      1,
+      Math.round(BASE_GRID_STEP_COOLDOWN_MS * gridTimingScale),
+    );
 
-    if (now - lastMoveAt < GRID_STEP_COOLDOWN_MS) {
+    if (now - lastMoveAt < gridStepCooldownMs) {
+      if (changed) {
+        playerIdentityStore.savePlayerSnapshot(toPlayerSnapshot(player));
+      }
       return;
     }
 
@@ -215,6 +256,9 @@ export class CatRoom extends Room<{ state: WorldState }> {
     const nextY = snappedPosition.y + step.y * worldConfig.gridCellSize;
 
     if (!isWalkableWorldPosition(nextX, nextY)) {
+      if (changed) {
+        playerIdentityStore.savePlayerSnapshot(toPlayerSnapshot(player));
+      }
       return;
     }
 
@@ -489,6 +533,20 @@ export class CatRoom extends Room<{ state: WorldState }> {
       }
     }
   }
+
+  private updatePlayerFacing(player: Player, horizontalStep: number) {
+    if (horizontalStep === 0) {
+      return false;
+    }
+
+    const nextFacing = horizontalStep < 0 ? "left" : "right";
+    if (player.facing === nextFacing) {
+      return false;
+    }
+
+    player.facing = nextFacing;
+    return true;
+  }
 }
 
 function isFiniteNumber(value: unknown): value is number {
@@ -546,6 +604,15 @@ function normalizeSearchZoneId(value: unknown) {
   }
 
   return value.trim();
+}
+
+function parseHorizontalFacing(value: unknown) {
+  const rawX = isRecord(value) ? value.x : undefined;
+  if (!isFiniteNumber(rawX)) {
+    return 0;
+  }
+
+  return toAxisStep(rawX);
 }
 
 function getSearchSuccessChance(zone: PreySearchZone) {
@@ -608,11 +675,12 @@ function randomInteger(min: number, max: number) {
   return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
-function toPlayerSnapshot(player: Player) {
+function toPlayerSnapshot(player: Player): PlayerSnapshot {
   return {
     playerId: player.playerId,
     name: player.name,
     x: player.x,
     y: player.y,
+    facing: player.facing === "left" ? "left" : "right",
   };
 }

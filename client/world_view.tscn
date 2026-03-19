@@ -2,7 +2,6 @@
 
 [ext_resource type="Script" uid="uid://cs73isrjo1pyk" path="res://scripts/world_view.gd" id="1_world_view"]
 [ext_resource type="Texture2D" uid="uid://bshppd0nb7qel" path="res://assets/backgrounds/травасвет2.png" id="2_background"]
-[ext_resource type="Texture2D" uid="uid://cmbio8igt0uoc" path="res://assets/environment/kust1 (2).png" id="3_irfmk"]
 [ext_resource type="Script" uid="uid://ckiyl22absis4" path="res://scripts/world_bounds.gd" id="4_world_bounds"]
 [ext_resource type="PackedScene" path="res://scenes/player_avatar.tscn" id="5_player_avatar"]
 [ext_resource type="Script" uid="uid://g5xpdgcrrqpu" path="res://scripts/world_blockers.gd" id="6_world_blockers"]
@@ -11,12 +10,14 @@
 [ext_resource type="Script" uid="uid://bnpj5s6lq6af2" path="res://scripts/prey_search_zones.gd" id="9_prey_search_zones"]
 [ext_resource type="Script" uid="uid://2nm1p3pd445c" path="res://scripts/world_spawn_points.gd" id="10_world_spawn_points"]
 [ext_resource type="Script" uid="uid://b4in4gwgqdkll" path="res://scripts/world_grid.gd" id="11_world_grid"]
+[ext_resource type="PackedScene" uid="uid://fwwvh7fopdwk" path="res://scenes/prey_avatar.tscn" id="12_prey_avatar"]
+[ext_resource type="PackedScene" path="res://scenes/bush.tscn" id="13_bush"]
 
 [sub_resource type="RectangleShape2D" id="RectangleShape2D_horizontal_wall"]
-size = Vector2(85952, 256)
+size = Vector2(32512, 256)
 
 [sub_resource type="RectangleShape2D" id="RectangleShape2D_vertical_wall"]
-size = Vector2(256, 85952)
+size = Vector2(256, 32512)
 
 [sub_resource type="TileSetAtlasSource" id="TileSetAtlasSource_pk1vb"]
 texture = ExtResource("2_background")
@@ -27,38 +28,39 @@ texture_region_size = Vector2i(1024, 1024)
 tile_size = Vector2i(1024, 1024)
 sources/0 = SubResource("TileSetAtlasSource_pk1vb")
 
-[sub_resource type="TileSetAtlasSource" id="TileSetAtlasSource_1ykip"]
-texture = ExtResource("3_irfmk")
-texture_region_size = Vector2i(395, 266)
-0:0/0 = 0
-
-[sub_resource type="TileSet" id="TileSet_eqm8l"]
-tile_size = Vector2i(395, 266)
-sources/0 = SubResource("TileSetAtlasSource_1ykip")
-
 [node name="WorldView" type="Node2D" unique_id=1743577822]
 script = ExtResource("1_world_view")
 
 [node name="WorldSettings" type="Node" parent="." unique_id=692254919]
 script = ExtResource("7_world_settings")
 
-[node name="Players" type="Node2D" parent="." unique_id=857034952]
+[node name="DepthObjects" type="Node2D" parent="." unique_id=857034952]
 z_index = 30
 y_sort_enabled = true
 
-[node name="PlayerPreview" parent="Players" unique_id=333606162 instance=ExtResource("5_player_avatar")]
+[node name="PlayerPreview" parent="DepthObjects" unique_id=333606162 instance=ExtResource("5_player_avatar")]
 editor_preview_only = true
 editor_preview_name = "Preview"
+
+[node name="NameLabel" parent="DepthObjects/PlayerPreview" index="2"]
+text = "Preview"
+
+[node name="BushPreview" parent="DepthObjects" unique_id=2121164107 instance=ExtResource("13_bush")]
+position = Vector2(-256, 0)
+editor_preview_only = true
+
+[node name="Sprite2D" parent="DepthObjects/BushPreview" index="0"]
+position = Vector2(0, -133)
+
+[node name="PreyPreview" parent="DepthObjects" unique_id=1611461697 instance=ExtResource("12_prey_avatar")]
+position = Vector2(256, 0)
+editor_preview_only = true
 
 [node name="Backgrounds" type="Node2D" parent="." unique_id=1806669005]
 z_index = -100
 
 [node name="Map" type="Node2D" parent="." unique_id=829624274]
 z_index = -50
-
-[node name="WorldGrid" type="Node2D" parent="." unique_id=1733447014]
-z_index = 50
-script = ExtResource("11_world_grid")
 
 [node name="Blockers" type="Node2D" parent="." unique_id=273289115]
 z_index = 45
@@ -77,54 +79,50 @@ z_index = 40
 script = ExtResource("4_world_bounds")
 
 [node name="WallTop" type="StaticBody2D" parent="Bounds" unique_id=34984496]
-position = Vector2(0, -42848)
+position = Vector2(0, -16128)
 
 [node name="CollisionShape2D" type="CollisionShape2D" parent="Bounds/WallTop" unique_id=1908562797]
 shape = SubResource("RectangleShape2D_horizontal_wall")
 
 [node name="WallBottom" type="StaticBody2D" parent="Bounds" unique_id=501328099]
-position = Vector2(0, 42848)
+position = Vector2(0, 16128)
 
 [node name="CollisionShape2D" type="CollisionShape2D" parent="Bounds/WallBottom" unique_id=90347780]
 shape = SubResource("RectangleShape2D_horizontal_wall")
 
 [node name="WallLeft" type="StaticBody2D" parent="Bounds" unique_id=2043179361]
-position = Vector2(-42848, 0)
+position = Vector2(-16128, 0)
 
 [node name="CollisionShape2D" type="CollisionShape2D" parent="Bounds/WallLeft" unique_id=1732070114]
 shape = SubResource("RectangleShape2D_vertical_wall")
 
 [node name="WallRight" type="StaticBody2D" parent="Bounds" unique_id=92992673]
-position = Vector2(42848, 0)
+position = Vector2(16128, 0)
 
 [node name="CollisionShape2D" type="CollisionShape2D" parent="Bounds/WallRight" unique_id=1584288907]
 shape = SubResource("RectangleShape2D_vertical_wall")
-
-[node name="Props" type="Node2D" parent="." unique_id=2084971643]
-z_index = 40
-y_sort_enabled = true
-
-[node name="NPCs" type="Node2D" parent="." unique_id=890049988]
-z_index = 20
-y_sort_enabled = true
 
 [node name="SpawnPoints" type="Node2D" parent="." unique_id=668320543]
 script = ExtResource("10_world_spawn_points")
 
 [node name="Camera2D" type="Camera2D" parent="." unique_id=320742266]
-limit_left = -42720
-limit_top = -42720
-limit_right = 42720
-limit_bottom = 42720
+zoom = Vector2(0.6, 0.6)
+limit_left = -16000
+limit_top = -16000
+limit_right = 16000
+limit_bottom = 16000
 position_smoothing_enabled = true
 position_smoothing_speed = 10.0
 
 [node name="grass" type="TileMapLayer" parent="." unique_id=381891270]
 z_index = -80
-tile_map_data = PackedByteArray("AAD/////AAAAAAAAAAAAAP//AAAAAAAAAAD//wAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAP//AAAAAAAAAAABAAAAAAAAAAAAAAACAAAAAAAAAAAAAAACAP//AAAAAAAAAAD+////AAAAAAAAAAD+/wAAAAAAAAAAAAD9/wAAAAAAAAAAAAD9////AAAAAAAAAAD9//7/AAAAAAAAAAD+//7/AAAAAAAAAAD///7/AAAAAAAAAAAAAP7/AAAAAAAAAAABAP7/AAAAAAAAAAACAP7/AAAAAAAAAAACAAEAAAAAAAAAAAABAAEAAAAAAAAAAAAAAAEAAAAAAAAAAAD//wEAAAAAAAAAAAD+/wEAAAAAAAAAAAD9/wEAAAAAAAAAAAADAP7/AAAAAAAAAAADAP//AAAAAAAAAAADAAAAAAAAAAAAAAADAAEAAAAAAAAAAAAEAP7/AAAAAAAAAAAEAP//AAAAAAAAAAAEAAAAAAAAAAAAAAAEAAEAAAAAAAAAAAAFAP7/AAAAAAAAAAAFAP//AAAAAAAAAAAFAAAAAAAAAAAAAAAFAAEAAAAAAAAAAAAGAP7/AAAAAAAAAAAGAP//AAAAAAAAAAAGAAAAAAAAAAAAAAAGAAEAAAAAAAAAAAAHAP7/AAAAAAAAAAAHAP//AAAAAAAAAAAHAAAAAAAAAAAAAAAHAAEAAAAAAAAAAAAIAP7/AAAAAAAAAAAIAP//AAAAAAAAAAAIAAAAAAAAAAAAAAAIAAEAAAAAAAAAAAAJAP7/AAAAAAAAAAAJAP//AAAAAAAAAAAJAAAAAAAAAAAAAAAJAAEAAAAAAAAAAAAKAP7/AAAAAAAAAAAKAP//AAAAAAAAAAAKAAAAAAAAAAAAAAAKAAEAAAAAAAAAAAALAP7/AAAAAAAAAAALAP//AAAAAAAAAAALAAEAAAAAAAAAAAAMAP7/AAAAAAAAAAAMAP//AAAAAAAAAAAMAAEAAAAAAAAAAAANAP7/AAAAAAAAAAANAP//AAAAAAAAAAANAAAAAAAAAAAAAAANAAEAAAAAAAAAAAAOAP7/AAAAAAAAAAAOAP//AAAAAAAAAAAOAAAAAAAAAAAAAAAOAAEAAAAAAAAAAAAPAP7/AAAAAAAAAAAPAP//AAAAAAAAAAAPAAAAAAAAAAAAAAAPAAEAAAAAAAAAAAAQAP7/AAAAAAAAAAAQAP//AAAAAAAAAAAQAAAAAAAAAAAAAAAQAAEAAAAAAAAAAAARAP7/AAAAAAAAAAARAP//AAAAAAAAAAARAAAAAAAAAAAAAAARAAEAAAAAAAAAAAASAP7/AAAAAAAAAAASAP//AAAAAAAAAAASAAAAAAAAAAAAAAASAAEAAAAAAAAAAAATAP7/AAAAAAAAAAATAP//AAAAAAAAAAATAAAAAAAAAAAAAAATAAEAAAAAAAAAAAAUAP7/AAAAAAAAAAAUAAEAAAAAAAAAAAAVAP7/AAAAAAAAAAAVAAEAAAAAAAAAAAAWAP7/AAAAAAAAAAAWAP//AAAAAAAAAAAWAAAAAAAAAAAAAAAWAAEAAAAAAAAAAAAXAP7/AAAAAAAAAAAXAP//AAAAAAAAAAAXAAAAAAAAAAAAAAAXAAEAAAAAAAAAAAAYAP7/AAAAAAAAAAAYAP//AAAAAAAAAAAYAAAAAAAAAAAAAAAYAAEAAAAAAAAAAAAZAP7/AAAAAAAAAAAZAP//AAAAAAAAAAAZAAAAAAAAAAAAAAAZAAEAAAAAAAAAAAAaAP7/AAAAAAAAAAAaAP//AAAAAAAAAAAaAAAAAAAAAAAAAAAaAAEAAAAAAAAAAAAbAP7/AAAAAAAAAAAbAP//AAAAAAAAAAAbAAAAAAAAAAAAAAAbAAEAAAAAAAAAAAAcAP7/AAAAAAAAAAAcAP//AAAAAAAAAAAcAAEAAAAAAAAAAAAdAP7/AAAAAAAAAAAdAP//AAAAAAAAAAAdAAEAAAAAAAAAAAAeAP7/AAAAAAAAAAAeAP//AAAAAAAAAAAeAAAAAAAAAAAAAAAeAAEAAAAAAAAAAAAfAP7/AAAAAAAAAAAfAP//AAAAAAAAAAAfAAAAAAAAAAAAAAAfAAEAAAAAAAAAAAAgAP7/AAAAAAAAAAAgAP//AAAAAAAAAAAgAAAAAAAAAAAAAAAgAAEAAAAAAAAAAAAhAP7/AAAAAAAAAAAhAP//AAAAAAAAAAAhAAAAAAAAAAAAAAAhAAEAAAAAAAAAAAAiAP7/AAAAAAAAAAAiAP//AAAAAAAAAAAiAAAAAAAAAAAAAAAiAAEAAAAAAAAAAAAjAP7/AAAAAAAAAAAjAAAAAAAAAAAAAAAjAAEAAAAAAAAAAAAkAP7/AAAAAAAAAAAlAP7/AAAAAAAAAAAlAP//AAAAAAAAAAAlAAAAAAAAAAAAAAAlAAEAAAAAAAAAAAAmAP7/AAAAAAAAAAAmAP//AAAAAAAAAAAmAAAAAAAAAAAAAAAmAAEAAAAAAAAAAAAnAP7/AAAAAAAAAAAnAP//AAAAAAAAAAAnAAAAAAAAAAAAAAAnAAEAAAAAAAAAAAAoAP7/AAAAAAAAAAAoAP//AAAAAAAAAAAoAAAAAAAAAAAAAAAoAAEAAAAAAAAAAAApAP7/AAAAAAAAAAApAP//AAAAAAAAAAApAAAAAAAAAAAAAAApAAEAAAAAAAAAAAA=")
+tile_map_data = PackedByteArray("AAD/////AAAAAAAAAAAAAP//AAAAAAAAAAD//wAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAP//AAAAAAAAAAABAAAAAAAAAAAAAAACAAAAAAAAAAAAAAACAP//AAAAAAAAAAD+////AAAAAAAAAAD+/wAAAAAAAAAAAAD9/wAAAAAAAAAAAAD9////AAAAAAAAAAD9//7/AAAAAAAAAAD+//7/AAAAAAAAAAD///7/AAAAAAAAAAAAAP7/AAAAAAAAAAABAP7/AAAAAAAAAAACAP7/AAAAAAAAAAACAAEAAAAAAAAAAAABAAEAAAAAAAAAAAAAAAEAAAAAAAAAAAD//wEAAAAAAAAAAAD+/wEAAAAAAAAAAAD9/wEAAAAAAAAAAAADAP7/AAAAAAAAAAADAP//AAAAAAAAAAADAAAAAAAAAAAAAAADAAEAAAAAAAAAAAAEAP7/AAAAAAAAAAAEAP//AAAAAAAAAAAEAAAAAAAAAAAAAAAEAAEAAAAAAAAAAAAFAP7/AAAAAAAAAAAFAP//AAAAAAAAAAAFAAAAAAAAAAAAAAAFAAEAAAAAAAAAAAAGAP7/AAAAAAAAAAAGAP//AAAAAAAAAAAGAAAAAAAAAAAAAAAGAAEAAAAAAAAAAAAHAP7/AAAAAAAAAAAHAP//AAAAAAAAAAAHAAAAAAAAAAAAAAAHAAEAAAAAAAAAAAAIAP7/AAAAAAAAAAAIAP//AAAAAAAAAAAIAAAAAAAAAAAAAAAIAAEAAAAAAAAAAAAJAP7/AAAAAAAAAAAJAP//AAAAAAAAAAAJAAAAAAAAAAAAAAAJAAEAAAAAAAAAAAAKAP7/AAAAAAAAAAAKAP//AAAAAAAAAAAKAAAAAAAAAAAAAAAKAAEAAAAAAAAAAAALAP7/AAAAAAAAAAALAP//AAAAAAAAAAALAAEAAAAAAAAAAAAMAP7/AAAAAAAAAAAMAP//AAAAAAAAAAAMAAEAAAAAAAAAAAANAP7/AAAAAAAAAAANAP//AAAAAAAAAAANAAAAAAAAAAAAAAANAAEAAAAAAAAAAAAOAP7/AAAAAAAAAAAOAP//AAAAAAAAAAAOAAAAAAAAAAAAAAAOAAEAAAAAAAAAAAAPAP7/AAAAAAAAAAAPAP//AAAAAAAAAAAPAAAAAAAAAAAAAAAPAAEAAAAAAAAAAAA=")
 tile_set = SubResource("TileSet_irfmk")
 
-[node name="bushes" type="TileMapLayer" parent="." unique_id=1469407261]
-z_index = 40
-tile_map_data = PackedByteArray("AAD///3/AAAAAAAAAAADAAAAAAAAAAAAAAD7//3/AAAAAAAAAAD8/wQAAAAAAAAAAAAGAAYAAAAAAAAAAAAFAPn/AAAAAAAAAAD5//n/AAAAAAAAAAA=")
-tile_set = SubResource("TileSet_eqm8l")
+[node name="WorldGrid" type="Node2D" parent="." unique_id=1733447014]
+z_index = 200
+script = ExtResource("11_world_grid")
+
+[editable path="DepthObjects/PlayerPreview"]
+[editable path="DepthObjects/BushPreview"]
+[editable path="DepthObjects/PreyPreview"]

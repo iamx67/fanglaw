@@ -3,53 +3,233 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Fanglaw Registration Prototype</title>
+  <title>Fanglaw Character Editor</title>
   <link rel="stylesheet" href="./styles.css">
 </head>
 <body>
   <main class="page">
     <section class="hero">
       <p class="eyebrow">Fanglaw Prototype</p>
-      <h1>Регистрация</h1>
+      <h1>Сайт и редактор персонажа</h1>
       <p class="lead">
-        Пока здесь только первый шаг: регистрация аккаунта и выбор имени персонажа.
-        Создание персонажа и редактор окраса будут отдельным этапом после регистрации.
+        Пока это локальный прототип. Регистрация и вход уже идут через сервер, а редактор внешности собирает
+        персонажа прямо на сайте и показывает будущий payload без сохранения в базу.
       </p>
     </section>
 
-    <section class="panel registration-panel">
-      <h2>Создать аккаунт</h2>
+    <section class="layout">
+      <section class="panel auth-panel">
+        <div class="panel-head">
+          <div>
+            <p class="eyebrow subtle">Account</p>
+            <h2>Аккаунт</h2>
+          </div>
+          <span id="auth-chip" class="chip">Гость</span>
+        </div>
 
-      <form id="registration-form" class="stack">
-        <label class="field">
-          <span>Имя персонажа</span>
-          <input id="character-name" name="characterName" type="text" maxlength="16" placeholder="Имя кота" required>
-        </label>
+        <div id="auth-logged-out">
+          <div class="auth-switch">
+            <button id="show-register-button" class="auth-switch-button is-active" type="button">Регистрация</button>
+            <button id="show-login-button" class="auth-switch-button" type="button">Вход</button>
+          </div>
 
-        <label class="field">
-          <span>Email</span>
-          <input id="email" name="email" type="email" placeholder="cat@fanglaw.ru" autocomplete="email" required>
-        </label>
+          <form id="registration-form" class="stack">
+            <label class="field">
+              <span>Имя персонажа</span>
+              <input id="character-name" name="characterName" type="text" maxlength="16" placeholder="Имя кота" required>
+            </label>
 
-        <label class="field">
-          <span>Пароль</span>
-          <input id="password" name="password" type="password" minlength="6" placeholder="Минимум 6 символов" autocomplete="new-password" required>
-        </label>
+            <label class="field">
+              <span>Email</span>
+              <input id="email" name="email" type="email" placeholder="cat@fanglaw.ru" autocomplete="email" required>
+            </label>
 
-        <label class="field">
-          <span>Повторите пароль</span>
-          <input id="password-confirm" name="passwordConfirm" type="password" minlength="6" placeholder="Повторите пароль" autocomplete="new-password" required>
-        </label>
+            <label class="field">
+              <span>Пароль</span>
+              <input id="password" name="password" type="password" minlength="6" placeholder="Минимум 6 символов" autocomplete="new-password" required>
+            </label>
 
-        <button class="button primary" type="submit">Зарегистрироваться</button>
-      </form>
+            <label class="field">
+              <span>Повторите пароль</span>
+              <input id="password-confirm" name="passwordConfirm" type="password" minlength="6" placeholder="Повторите пароль" autocomplete="new-password" required>
+            </label>
 
-      <p id="form-status" class="status" aria-live="polite"></p>
+            <button class="button primary" type="submit">Зарегистрироваться</button>
+          </form>
 
-      <div class="saved-box">
-        <h3>Локально сохранённые данные</h3>
-        <pre id="saved-data">Пока ничего не сохранено.</pre>
-      </div>
+          <form id="login-form" class="stack is-hidden">
+            <label class="field">
+              <span>Email</span>
+              <input id="login-email" name="loginEmail" type="email" placeholder="cat@fanglaw.ru" autocomplete="email" required>
+            </label>
+
+            <label class="field">
+              <span>Пароль</span>
+              <input id="login-password" name="loginPassword" type="password" minlength="6" placeholder="Пароль" autocomplete="current-password" required>
+            </label>
+
+            <button class="button primary" type="submit">Войти</button>
+          </form>
+        </div>
+
+        <div id="auth-logged-in" class="stack is-hidden">
+          <div class="account-card">
+            <strong id="account-character-name">Player</strong>
+            <span id="account-email">cat@fanglaw.ru</span>
+          </div>
+          <button id="logout-button" class="button secondary" type="button">Выйти</button>
+        </div>
+
+        <p id="form-status" class="status" aria-live="polite"></p>
+
+        <div class="saved-box">
+          <h3>Локально сохранённые данные</h3>
+          <pre id="saved-data">Пока ничего не сохранено.</pre>
+        </div>
+      </section>
+
+      <section id="editor-locked" class="panel editor-locked">
+        <div class="panel-head">
+          <div>
+            <p class="eyebrow subtle">Access</p>
+            <h2>Редактор закрыт</h2>
+          </div>
+          <span class="chip muted">Нужен вход</span>
+        </div>
+        <p class="lead compact">
+          Сначала зарегистрируйтесь или войдите на сайт. После успешного входа редактор внешности откроется здесь автоматически.
+        </p>
+      </section>
+
+      <section id="editor-panel" class="panel editor-panel is-hidden">
+        <div class="panel-head">
+          <div>
+            <p class="eyebrow subtle">Editor Demo</p>
+            <h2>Редактор внешности</h2>
+          </div>
+          <span class="chip">Локальный предпросмотр</span>
+        </div>
+
+        <div class="editor-grid">
+          <div class="editor-controls stack">
+            <section class="editor-section stack">
+              <h3>Основа</h3>
+
+              <label class="field">
+                <span>Цвет базы</span>
+                <input id="body-color" type="color" value="#ede7df">
+              </label>
+
+              <label class="field">
+                <span>Нос</span>
+                <input id="nose-color" type="color" value="#ede7df">
+              </label>
+
+              <label class="field">
+                <span>Глаза</span>
+                <input id="eye-color" type="color" value="#ede7df">
+              </label>
+            </section>
+
+            <section class="editor-section stack">
+              <h3>Обязательные элементы</h3>
+
+              <label class="field">
+                <span>Уши</span>
+                <select id="ears-select">
+                  <option value="ears1">Уши 1</option>
+                  <option value="ears2">Уши 2</option>
+                  <option value="ears3">Уши 3</option>
+                </select>
+              </label>
+
+              <label class="field">
+                <span>Цвет ушей</span>
+                <input id="ears-color" type="color" value="#ede7df">
+              </label>
+
+              <label class="field">
+                <span>Хвост</span>
+                <select id="tail-select">
+                  <option value="tails1">Хвост 1</option>
+                  <option value="tails2">Хвост 2</option>
+                  <option value="tails3">Хвост 3</option>
+                </select>
+              </label>
+
+              <label class="field">
+                <span>Цвет хвоста</span>
+                <input id="tail-color" type="color" value="#ede7df">
+              </label>
+            </section>
+
+            <section class="editor-section stack">
+              <h3>Необязательные элементы</h3>
+
+              <label class="field">
+                <span>Грива</span>
+                <select id="mane-select">
+                  <option value="none">Без гривы</option>
+                  <option value="manes1">Грива 1</option>
+                </select>
+              </label>
+
+              <label class="field">
+                <span>Цвет гривы</span>
+                <input id="mane-color" type="color" value="#ede7df">
+              </label>
+
+              <label class="field">
+                <span>Щёки</span>
+                <select id="cheeks-select">
+                  <option value="none">Без щёк</option>
+                  <option value="cheeks1">Щёки 1</option>
+                  <option value="cheeks2">Щёки 2</option>
+                </select>
+              </label>
+            </section>
+
+            <section class="editor-section stack">
+              <div class="section-head">
+                <h3>Паттерны базы</h3>
+                <div class="section-head-actions">
+                  <span class="section-note">Порядок сверху вниз меняется стрелками</span>
+                  <button id="body-pattern-add-button" class="slot-button slot-button-add" type="button">+</button>
+                </div>
+              </div>
+              <div id="body-pattern-slots" class="pattern-slots"></div>
+            </section>
+
+            <section class="editor-section stack">
+              <div class="section-head">
+                <h3>Паттерны хвоста</h3>
+                <div class="section-head-actions">
+                  <span class="section-note">Список зависит от выбранного хвоста</span>
+                  <button id="tail-pattern-add-button" class="slot-button slot-button-add" type="button">+</button>
+                </div>
+              </div>
+              <div id="tail-pattern-slots" class="pattern-slots"></div>
+            </section>
+          </div>
+
+          <div class="preview-column">
+            <div class="preview-card">
+              <div class="preview-stage">
+                <canvas id="character-preview" width="512" height="512" aria-label="Предпросмотр персонажа"></canvas>
+              </div>
+              <div class="preview-caption">
+                <strong id="preview-name">Player</strong>
+                <span>Сайтовый предпросмотр новой сборки аватара</span>
+              </div>
+            </div>
+
+            <div class="saved-box">
+              <h3>Будущий payload внешности</h3>
+              <pre id="appearance-payload">{}</pre>
+            </div>
+          </div>
+        </div>
+      </section>
     </section>
   </main>
 

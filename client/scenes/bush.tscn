@@ -1,0 +1,11 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/bush.gd" id="1_bush"]
+[ext_resource type="Texture2D" path="res://assets/environment/kust1 (2).png" id="2_texture"]
+
+[node name="Bush" type="Node2D"]
+script = ExtResource("1_bush")
+bush_texture = ExtResource("2_texture")
+
+[node name="Sprite2D" type="Sprite2D" parent="."]
+texture = ExtResource("2_texture")

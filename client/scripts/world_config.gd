@@ -3,9 +3,9 @@ extends RefCounted
 
 const CONFIG_PATH := "res://data/world_config.json"
 const BLOCKERS_PATH := "res://data/world_blockers.json"
-const DEFAULT_CELL_SIZE := 64.0
-const DEFAULT_WORLD_HALF_WIDTH_CELLS := 667.0
-const DEFAULT_WORLD_HALF_HEIGHT_CELLS := 667.0
+const DEFAULT_CELL_SIZE := 256.0
+const DEFAULT_WORLD_HALF_WIDTH_CELLS := 62.0
+const DEFAULT_WORLD_HALF_HEIGHT_CELLS := 62.0
 const DEFAULT_WALL_THICKNESS := 256.0
 
 static var _loaded := false

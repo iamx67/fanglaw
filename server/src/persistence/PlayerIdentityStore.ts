@@ -8,6 +8,7 @@ export type PlayerIdentity = {
   name: string;
   x: number;
   y: number;
+  facing: "left" | "right";
   createdAt: number;
   updatedAt: number;
 };
@@ -17,6 +18,7 @@ export type PlayerSnapshot = {
   name: string;
   x: number;
   y: number;
+  facing: "left" | "right";
 };
 
 export interface PlayerIdentityStoreBackend {
@@ -70,6 +72,7 @@ class FilePlayerIdentityStore implements PlayerIdentityStoreBackend {
             name: normalizeStoredName(profile.name),
             x: normalizeStoredNumber(profile.x),
             y: normalizeStoredNumber(profile.y),
+            facing: normalizeStoredFacing(profile.facing),
             createdAt: normalizeStoredTimestamp(profile.createdAt),
             updatedAt: normalizeStoredTimestamp(profile.updatedAt),
           });
@@ -119,6 +122,7 @@ class FilePlayerIdentityStore implements PlayerIdentityStoreBackend {
       name: suggestedName ? nextName : "Cat",
       x: 0,
       y: 0,
+      facing: "right",
       createdAt: now,
       updatedAt: now,
     };
@@ -155,6 +159,11 @@ class FilePlayerIdentityStore implements PlayerIdentityStoreBackend {
 
     if (profile.y !== snapshot.y) {
       profile.y = snapshot.y;
+      changed = true;
+    }
+
+    if (profile.facing !== snapshot.facing) {
+      profile.facing = normalizeStoredFacing(snapshot.facing);
       changed = true;
     }
 
@@ -292,6 +301,7 @@ function serializePlayersFile(players: Map<string, PlayerIdentity>): StoredPlaye
       name: normalizeStoredName(profile.name),
       x: normalizeStoredNumber(profile.x),
       y: normalizeStoredNumber(profile.y),
+      facing: normalizeStoredFacing(profile.facing),
       createdAt: normalizeStoredTimestamp(profile.createdAt),
       updatedAt: normalizeStoredTimestamp(profile.updatedAt),
     };
@@ -318,6 +328,10 @@ export function normalizeStoredName(value: unknown) {
 
 export function normalizeStoredNumber(value: unknown) {
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+export function normalizeStoredFacing(value: unknown): PlayerIdentity["facing"] {
+  return value === "left" ? "left" : "right";
 }
 
 export function normalizeStoredTimestamp(value: unknown) {

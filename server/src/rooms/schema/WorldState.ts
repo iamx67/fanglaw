@@ -6,6 +6,7 @@ export class Player extends Schema {
   @type("string") name: string = "Cat";
   @type("number") x: number = 0;
   @type("number") y: number = 0;
+  @type("string") facing: string = "right";
   @type("boolean") connected: boolean = true;
 }
 

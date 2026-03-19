@@ -1,5 +1,6 @@
 import {
   normalizeStoredAccountType,
+  normalizeStoredFacing,
   normalizeStoredName,
   normalizeStoredNumber,
   normalizeStoredTimestamp,
@@ -35,9 +36,13 @@ CREATE TABLE IF NOT EXISTS player_profiles (
   name TEXT NOT NULL,
   x DOUBLE PRECISION NOT NULL DEFAULT 0,
   y DOUBLE PRECISION NOT NULL DEFAULT 0,
+  facing TEXT NOT NULL DEFAULT 'right',
   created_at BIGINT NOT NULL,
   updated_at BIGINT NOT NULL
 );
+
+ALTER TABLE player_profiles
+  ADD COLUMN IF NOT EXISTS facing TEXT NOT NULL DEFAULT 'right';
 
 CREATE INDEX IF NOT EXISTS player_profiles_account_type_idx
   ON player_profiles (account_type);
@@ -78,6 +83,7 @@ export class PostgresPlayerIdentityStore implements PlayerIdentityStoreBackend {
         name,
         x,
         y,
+        facing,
         created_at,
         updated_at
       FROM player_profiles`,
@@ -126,6 +132,7 @@ export class PostgresPlayerIdentityStore implements PlayerIdentityStoreBackend {
       name: suggestedName ? nextName : "Cat",
       x: 0,
       y: 0,
+      facing: "right",
       createdAt: now,
       updatedAt: now,
     };
@@ -165,6 +172,11 @@ export class PostgresPlayerIdentityStore implements PlayerIdentityStoreBackend {
       changed = true;
     }
 
+    if (profile.facing !== snapshot.facing) {
+      profile.facing = normalizeStoredFacing(snapshot.facing);
+      changed = true;
+    }
+
     if (changed) {
       this.touch(profile);
     }
@@ -198,14 +210,16 @@ export class PostgresPlayerIdentityStore implements PlayerIdentityStoreBackend {
               name,
               x,
               y,
+              facing,
               created_at,
               updated_at
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
             ON CONFLICT (player_id) DO UPDATE SET
               account_type = EXCLUDED.account_type,
               name = EXCLUDED.name,
               x = EXCLUDED.x,
               y = EXCLUDED.y,
+              facing = EXCLUDED.facing,
               created_at = EXCLUDED.created_at,
               updated_at = EXCLUDED.updated_at`,
             [
@@ -214,6 +228,7 @@ export class PostgresPlayerIdentityStore implements PlayerIdentityStoreBackend {
               profile.name,
               profile.x,
               profile.y,
+              profile.facing,
               profile.createdAt,
               profile.updatedAt,
             ],
@@ -280,6 +295,7 @@ function mapProfileRow(row: DatabaseRow): PlayerIdentity {
     name: normalizeStoredName(row.name),
     x: normalizeStoredNumber(numberValue(row.x)),
     y: normalizeStoredNumber(numberValue(row.y)),
+    facing: normalizeStoredFacing(row.facing),
     createdAt: normalizeStoredTimestamp(numberValue(row.created_at)),
     updatedAt: normalizeStoredTimestamp(numberValue(row.updated_at)),
   };

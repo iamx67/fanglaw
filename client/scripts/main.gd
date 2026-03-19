@@ -15,8 +15,11 @@ const SERVER_ENDPOINT_KEY := "endpoint"
 const ROOM_NAME := "cats"
 const PING_INTERVAL := 2.0
 const AUTO_CONNECT_RETRY_SECONDS := 3.0
-const GRID_MOVE_REPEAT_SECONDS := 0.16
-const CELL_TRANSITION_DURATION := 0.16
+const BASE_GRID_MOVE_REPEAT_SECONDS := 0.13
+const BASE_CELL_TRANSITION_DURATION := 0.13
+const BASE_GRID_TIMING_CELL_SIZE := 64.0
+const GRID_TIMING_SCALE_EXPONENT := 0.8
+const VISUAL_STEP_OVERLAP_RATIO := 1.04
 const GRID_POSITION_EPSILON := 0.1
 const RANDOM_NAME_LENGTH := 8
 const RANDOM_NAME_ALPHABET := "abcdefghijklmnopqrstuvwxyz"
@@ -52,6 +55,7 @@ class Player extends colyseus.Schema:
 			colyseus.Field.new("name", colyseus.STRING),
 			colyseus.Field.new("x", colyseus.NUMBER),
 			colyseus.Field.new("y", colyseus.NUMBER),
+			colyseus.Field.new("facing", colyseus.STRING),
 			colyseus.Field.new("connected", colyseus.BOOLEAN),
 		]
 
@@ -116,6 +120,8 @@ var last_cardinal_direction := Vector2.ZERO
 var move_cooldown_remaining := 0.0
 var auth_login_in_progress := false
 var active_prey_search_zone = null
+var local_facing := "right"
+var last_sent_facing := ""
 
 func _ready() -> void:
 	focus_mode = Control.FOCUS_ALL
@@ -154,6 +160,17 @@ func _process(delta: float) -> void:
 	_smooth_avatar_positions(delta)
 	_sync_camera_to_local_avatar()
 	_update_world_actions()
+
+func _grid_timing_scale() -> float:
+	return pow(maxf(WorldConfig.cell_size() / BASE_GRID_TIMING_CELL_SIZE, 0.001), GRID_TIMING_SCALE_EXPONENT)
+
+func _grid_move_repeat_seconds() -> float:
+	return BASE_GRID_MOVE_REPEAT_SECONDS * _grid_timing_scale()
+
+func _cell_transition_duration() -> float:
+	# Slight overlap keeps step-to-step motion continuous instead of briefly stopping
+	# between accepted grid moves when the key is held.
+	return (BASE_CELL_TRANSITION_DURATION * _grid_timing_scale()) * VISUAL_STEP_OVERLAP_RATIO
 
 func _begin_auto_connect() -> void:
 	if _has_reconnection_token():
@@ -272,6 +289,8 @@ func _activate_room(next_room: colyseus.Room, is_reconnect: bool) -> void:
 	held_move_direction = Vector2.ZERO
 	last_cardinal_direction = Vector2.ZERO
 	move_cooldown_remaining = 0.0
+	local_facing = "right"
+	last_sent_facing = ""
 
 	_store_reconnection_token(room.reconnection_token)
 	_bind_room_events()
@@ -426,6 +445,8 @@ func _register_player(player_id: String, player: Player) -> void:
 	var is_local_avatar := _is_local_player(player_id, player)
 	avatar.configure(_display_player_name(player), is_local_avatar)
 	avatar.modulate = Color(1, 1, 1, 1.0 if player.connected else 0.55)
+	if avatar.has_method("set_facing"):
+		avatar.set_facing(_normalize_player_facing(player))
 
 	var position := Vector2(player.x, player.y)
 	if is_local_avatar:
@@ -488,6 +509,9 @@ func _register_prey(prey_id: String, prey: Prey) -> void:
 	if prey_avatar == null:
 		prey_avatar = PreyAvatarScene.instantiate()
 		prey_avatar.name = "PreyAvatar_%s" % prey_id
+		var prey_preview = world_view.npc_layer.get_node_or_null("PreyPreview")
+		if prey_preview != null and prey_avatar.has_method("copy_visual_from"):
+			prey_avatar.copy_visual_from(prey_preview)
 		world_view.npc_layer.add_child(prey_avatar)
 		prey_avatars[prey_id] = prey_avatar
 
@@ -530,6 +554,8 @@ func _clear_world() -> void:
 	local_pending_steps.clear()
 	current_player_name = ""
 	active_prey_search_zone = null
+	local_facing = "right"
+	last_sent_facing = ""
 	world_view.reset_camera()
 	_update_action_ui()
 	_refresh_debug_info()
@@ -738,6 +764,8 @@ func _store_local_player_identity(player_id: String, player: Player, is_new_avat
 	local_player_id = player_id
 
 	local_session_id = str(player.sessionId)
+	local_facing = _normalize_player_facing(player)
+	last_sent_facing = local_facing
 	var server_position := Vector2(player.x, player.y)
 	current_player_name = _display_player_name(player)
 
@@ -778,12 +806,13 @@ func _handle_grid_movement_input() -> void:
 		return
 
 	held_move_direction = held_direction
+	_apply_facing_from_direction(held_direction)
 
 	if move_cooldown_remaining > 0.0:
 		return
 
 	_send_grid_move(held_direction)
-	move_cooldown_remaining = GRID_MOVE_REPEAT_SECONDS
+	move_cooldown_remaining = _grid_move_repeat_seconds()
 
 func _read_current_grid_direction() -> Vector2:
 	var diagonal_direction := _read_explicit_diagonal_direction()
@@ -863,7 +892,7 @@ func _smooth_avatar_positions(delta: float) -> void:
 
 		var target_position: Vector2 = avatar_target_positions[player_id]
 		var step_distance: float = avatar_step_distances.get(player_id, WorldConfig.cell_size())
-		var transition_speed := step_distance / CELL_TRANSITION_DURATION
+		var transition_speed := step_distance / _cell_transition_duration()
 		var is_moving := avatar.position.distance_to(target_position) > 1.0
 		avatar.position = avatar.position.move_toward(target_position, transition_speed * delta)
 
@@ -878,6 +907,7 @@ func _predict_local_grid_move(direction: Vector2) -> void:
 	if local_player_id.is_empty() or not avatars.has(local_player_id):
 		return
 
+	_apply_facing_from_direction(direction)
 	var predicted_position := local_position + (direction * WorldConfig.cell_size())
 	if not WorldConfig.is_walkable_position(predicted_position):
 		return
@@ -1096,6 +1126,33 @@ func _get_active_prey_search_zone_id() -> String:
 		return ""
 
 	return str(active_prey_search_zone.get("search_zone_id")).strip_edges()
+
+func _apply_facing_from_direction(direction: Vector2) -> void:
+	if direction.x == 0:
+		return
+
+	var next_facing := "left" if direction.x < 0 else "right"
+	if local_facing == next_facing and last_sent_facing == next_facing:
+		return
+
+	local_facing = next_facing
+
+	var avatar := avatars.get(local_player_id) as Node
+	if avatar != null and avatar.has_method("set_facing"):
+		avatar.set_facing(local_facing)
+
+	if room != null and room.has_joined() and last_sent_facing != local_facing:
+		room.send("face", {
+			"x": int(sign(direction.x)),
+		})
+		last_sent_facing = local_facing
+
+func _normalize_player_facing(player: Player) -> String:
+	if player == null:
+		return "right"
+
+	var facing := str(player.facing).strip_edges().to_lower()
+	return "left" if facing == "left" else "right"
 
 func _refresh_auth_copy() -> void:
 	auth_description_label.text = "Если аккаунта ещё нет, откройте сайт и зарегистрируйтесь."
