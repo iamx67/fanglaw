@@ -79,6 +79,7 @@ python dev_server.py
 ## Где смотреть документацию
 
 - [PROJECT_CONTEXT_RU.md](./PROJECT_CONTEXT_RU.md) — текущий контекст проекта
+- [DEPLOY_NOW_RU.md](./DEPLOY_NOW_RU.md) — самый короткий деплой сайта и игры на `fanglaw1.ru`
 - [docs/domain-model.md](./docs/domain-model.md) — термины и compatibility contract
 - [docs/migration-plan.md](./docs/migration-plan.md) — какие этапы рефакторинга уже сделаны
 - [docs/STATUS_RU.md](./docs/STATUS_RU.md) — короткий список того, что уже реализовано и что менялось недавно

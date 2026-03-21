@@ -25,7 +25,8 @@ npm run build
 pm2 restart fanglaw-server --update-env
 
 rm -rf /var/www/fanglaw-web/current/*
-cp -r /root/fanglaw/client/web_export/* /var/www/fanglaw-web/current/
+cp -r /root/fanglaw/site/. /var/www/fanglaw-web/current/
+cp -r /root/fanglaw/client/web_export/. /var/www/fanglaw-web/current/
 chown -R www-data:www-data /var/www/fanglaw-web
 chmod -R 755 /var/www/fanglaw-web
 ```
@@ -66,6 +67,7 @@ pm2 restart fanglaw-server --update-env
 
 Например:
 
+- `site/*`
 - `client/web_export/*`
 - web-сборка после нового Godot export
 
@@ -76,7 +78,8 @@ cd /root/fanglaw
 git pull
 
 rm -rf /var/www/fanglaw-web/current/*
-cp -r /root/fanglaw/client/web_export/* /var/www/fanglaw-web/current/
+cp -r /root/fanglaw/site/. /var/www/fanglaw-web/current/
+cp -r /root/fanglaw/client/web_export/. /var/www/fanglaw-web/current/
 chown -R www-data:www-data /var/www/fanglaw-web
 chmod -R 755 /var/www/fanglaw-web
 
@@ -158,7 +161,7 @@ ls -la /var/www/fanglaw-web/current
 
 Частая причина:
 
-- web-файлы не были скопированы в `/var/www/fanglaw-web/current`
+- web-файлы из `site/` и `client/web_export/` не были скопированы в `/var/www/fanglaw-web/current`
 
 ---
 
@@ -211,7 +214,7 @@ systemctl status nginx --no-pager
 2. `npm install`
 3. `npm run build`
 4. `pm2 restart fanglaw-server --update-env`
-5. если менялся web-export — скопировать `client/web_export/*`
+5. если менялся web-root — скопировать и `site/*`, и `client/web_export/*`
 6. если менялся nginx и у вас уже есть HTTPS — не перезаписывать Certbot-конфиг HTTP-only шаблоном без необходимости
 7. после правок nginx — `nginx -t && systemctl reload nginx`
 # Update note, 2026-03-16

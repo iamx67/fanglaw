@@ -5,6 +5,7 @@
 [ext_resource type="PackedScene" path="res://scenes/prey_search_zone.tscn" id="4_1bvp3"]
 [ext_resource type="PackedScene" path="res://scenes/bush.tscn" id="4_7mycd"]
 [ext_resource type="Texture2D" uid="uid://d1vmq1w55ndab" path="res://assets/creatures/kulik.png" id="4_074og"]
+[ext_resource type="Texture2D" uid="uid://bn6dlgrw0x16r" path="res://assets/ui/bird_watch_indicator.png" id="4_cegan"]
 [ext_resource type="PackedScene" uid="uid://fwwvh7fopdwk" path="res://scenes/prey_avatar.tscn" id="5_cegan"]
 [ext_resource type="Texture2D" uid="uid://6x1sgp27k4xh" path="res://assets/creatures/mouse1.png" id="5_lquwl"]
 [ext_resource type="Texture2D" uid="uid://cw7dgjir3g0y0" path="res://assets/environment/brevno.png" id="6_4c57u"]
@@ -53,8 +54,14 @@ scale = Vector2(1, 1)
 [node name="Sprite2D" parent="WorldView/DepthObjects/PreyVisualLibrary/PreyVisual_mouse/VisualRoot" index="0" unique_id=1774885751]
 texture = ExtResource("5_lquwl")
 
+[node name="WatchIndicator" parent="WorldView/DepthObjects/PreyVisualLibrary/PreyVisual_mouse" parent_id_path=PackedInt32Array(1976402734, 2078488361) index="1" unique_id=1053428832]
+texture = ExtResource("4_cegan")
+
 [node name="Sprite2D" parent="WorldView/DepthObjects/PreyVisualLibrary/PreyVisual_kulik/VisualRoot" parent_id_path=PackedInt32Array(1976402734, 1146300920, 1269698390) index="0" unique_id=1774885751]
 texture = ExtResource("4_074og")
+
+[node name="WatchIndicator" parent="WorldView/DepthObjects/PreyVisualLibrary/PreyVisual_kulik" parent_id_path=PackedInt32Array(1976402734, 1146300920) index="1" unique_id=1053428832]
+texture = ExtResource("4_cegan")
 
 [node name="PreyVisual_krol" parent="WorldView/DepthObjects/PreyVisualLibrary" parent_id_path=PackedInt32Array(1976402734, 984630255) index="2" unique_id=1316522210 instance=ExtResource("5_cegan")]
 position = Vector2(128, 0)
@@ -62,6 +69,9 @@ editor_preview_only = true
 editor_preview_visual_id = "zayac"
 editor_preview_kind = "rabbit"
 visual_texture = ExtResource("6_82xsv")
+
+[node name="WatchIndicator" parent="WorldView/DepthObjects/PreyVisualLibrary/PreyVisual_krol" index="1" unique_id=1053428832]
+texture = ExtResource("4_cegan")
 
 [node name="Bush" parent="WorldView/DepthObjects" parent_id_path=PackedInt32Array(1976402734, 857034952) index="3" unique_id=1212934850 instance=ExtResource("4_7mycd")]
 position = Vector2(-119, -686)

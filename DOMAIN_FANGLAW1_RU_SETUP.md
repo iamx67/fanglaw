@@ -4,7 +4,8 @@
 
 Схема работы:
 
-- `https://fanglaw1.ru` раздаёт web-клиент Godot
+- `https://fanglaw1.ru` раздаёт сайт `auth -> create-character -> appearance`
+- `https://fanglaw1.ru/catlaw.html` открывает web-клиент Godot
 - тот же `fanglaw1.ru` проксирует Colyseus:
   - `POST /matchmake/...`
   - websocket-подключения `/<processId>/<roomId>?sessionId=...`
@@ -29,7 +30,9 @@
 
 3. Локально сделать Godot Web export.
 
-4. Залить экспорт на VPS в `/var/www/fanglaw-web/current`.
+4. Залить в `/var/www/fanglaw-web/current` общий static-root:
+   - `site/*`
+   - `client/web_export/*`
 
 5. Потом включить HTTPS и перевести клиент на `wss`.
 
@@ -67,9 +70,19 @@ endpoint="wss://fanglaw1.ru"
 
 Текущая web-сборка Godot экспортируется как:
 
+- `index.html`
+- `create-character.html`
+- `appearance.html`
+- `app.js`
+- `styles.css`
+- `assets/...`
 - `catlaw.html`
 - `catlaw.js`
 - `catlaw.wasm`
 - `catlaw.pck`
 
-Поэтому nginx в этом проекте должен отдавать именно `catlaw.html`, а не `index.html`.
+Поэтому nginx в этом проекте должен:
+
+- отдавать `index.html` на `/`
+- отдавать `catlaw.html` по пути `/catlaw.html`
+- проксировать `/api/*` в backend
