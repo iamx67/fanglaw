@@ -3,119 +3,180 @@ class_name WorldGrid
 extends Node2D
 
 const WorldConfig = preload("res://scripts/world_config.gd")
-const GRID_FILL_COLOR := Color(0.117647, 0.141176, 0.160784, 0.0)
-const GRID_LINE_COLOR := Color(0.88, 0.95, 1.0, 0.22)
-const GRID_MAJOR_LINE_COLOR := Color(0.95, 0.98, 1.0, 0.42)
-const GRID_SUPER_MAJOR_LINE_COLOR := Color(1.0, 1.0, 1.0, 0.68)
-const GRID_AXIS_COLOR := Color(1.0, 0.94, 0.62, 0.78)
-const GRID_BORDER_COLOR := Color(1.0, 0.94, 0.62, 0.62)
+const GRID_LINE_COLOR := Color(0.88, 0.95, 1.0, 0.18)
+const GRID_MAJOR_LINE_COLOR := Color(0.95, 0.98, 1.0, 0.30)
+const GRID_SUPER_MAJOR_LINE_COLOR := Color(1.0, 1.0, 1.0, 0.42)
+const GRID_AXIS_COLOR := Color(1.0, 0.94, 0.62, 0.54)
+const GRID_BORDER_COLOR := Color(1.0, 0.94, 0.62, 0.42)
+const LINES_CONTAINER_NAME := "__GridLines"
 
-@export var show_in_game := false
-@export var line_alpha := 0.22:
+@export var show_in_game := false:
+	set(value):
+		show_in_game = value
+		_update_grid_visibility()
+@export var line_alpha := 0.18:
 	set(value):
 		line_alpha = clampf(value, 0.0, 1.0)
-		queue_redraw()
-@export var major_line_alpha := 0.42:
+		_rebuild_grid()
+@export var major_line_alpha := 0.30:
 	set(value):
 		major_line_alpha = clampf(value, 0.0, 1.0)
-		queue_redraw()
-@export var super_major_line_alpha := 0.68:
+		_rebuild_grid()
+@export var super_major_line_alpha := 0.42:
 	set(value):
 		super_major_line_alpha = clampf(value, 0.0, 1.0)
-		queue_redraw()
-@export var axis_alpha := 0.78:
+		_rebuild_grid()
+@export var axis_alpha := 0.54:
 	set(value):
 		axis_alpha = clampf(value, 0.0, 1.0)
-		queue_redraw()
-@export var border_alpha := 0.62:
+		_rebuild_grid()
+@export var border_alpha := 0.42:
 	set(value):
 		border_alpha = clampf(value, 0.0, 1.0)
-		queue_redraw()
+		_rebuild_grid()
 @export_range(1, 64, 1) var major_line_every_cells := 1:
 	set(value):
 		major_line_every_cells = maxi(1, value)
-		queue_redraw()
+		_rebuild_grid()
 @export_range(1, 128, 1) var super_major_line_every_cells := 4:
 	set(value):
 		super_major_line_every_cells = maxi(1, value)
-		queue_redraw()
+		_rebuild_grid()
+
+var _last_signature := ""
 
 func _ready() -> void:
 	set_process(Engine.is_editor_hint())
-	queue_redraw()
+	_rebuild_grid()
 
 func _process(_delta: float) -> void:
 	if not Engine.is_editor_hint():
 		return
 
-	queue_redraw()
-
-func _draw() -> void:
-	if not Engine.is_editor_hint() and not show_in_game:
+	var next_signature := _build_signature()
+	if next_signature == _last_signature:
 		return
 
-	var rect := WorldConfig.outer_world_rect()
+	_rebuild_grid()
+
+func _rebuild_grid() -> void:
+	if not is_inside_tree():
+		return
+
+	_last_signature = _build_signature()
+	var lines_container := _ensure_lines_container()
+	for child in lines_container.get_children():
+		child.queue_free()
+
+	_update_grid_visibility()
+	if not lines_container.visible:
+		return
+
 	var cell_size := WorldConfig.cell_size()
-	var grid_line_color := GRID_LINE_COLOR
-	grid_line_color.a = line_alpha
-	var grid_major_line_color := GRID_MAJOR_LINE_COLOR
-	grid_major_line_color.a = major_line_alpha
-	var grid_super_major_line_color := GRID_SUPER_MAJOR_LINE_COLOR
-	grid_super_major_line_color.a = super_major_line_alpha
-	var grid_axis_color := GRID_AXIS_COLOR
-	grid_axis_color.a = axis_alpha
-	var grid_border_color := GRID_BORDER_COLOR
-	grid_border_color.a = border_alpha
-	var major_every := 1
-	if major_line_every_cells != null:
-		major_every = maxi(1, int(major_line_every_cells))
-	var super_major_every := 4
-	if super_major_line_every_cells != null:
-		super_major_every = maxi(1, int(super_major_line_every_cells))
-	var line_width := maxf(4.0, cell_size * 0.045)
-	var major_line_width := maxf(6.0, cell_size * 0.065)
-	var super_major_line_width := maxf(8.0, cell_size * 0.085)
-	var axis_line_width := maxf(8.0, cell_size * 0.09)
-	var border_width := maxf(6.0, cell_size * 0.065)
+	var half_width_cells := int(round(WorldConfig.world_half_width_cells()))
+	var half_height_cells := int(round(WorldConfig.world_half_height_cells()))
+	var world_min_x := WorldConfig.world_min_x()
+	var world_max_x := WorldConfig.world_max_x()
+	var world_min_y := WorldConfig.world_min_y()
+	var world_max_y := WorldConfig.world_max_y()
+	var playable_rect := WorldConfig.playable_bounds_rect()
 
-	draw_rect(rect, GRID_FILL_COLOR, true)
+	var line_width := 2.0
+	var major_line_width := 3.0
+	var super_major_line_width := 4.0
+	var axis_line_width := 4.0
+	var border_line_width := 4.0
 
-	var x := rect.position.x
-	var x_index := 0
-	while x <= rect.end.x + 0.5:
-		var x_color := grid_line_color
-		var x_width := line_width
-		if is_zero_approx(x):
-			x_color = grid_axis_color
-			x_width = axis_line_width
-		elif x_index % super_major_every == 0:
-			x_color = grid_super_major_line_color
-			x_width = super_major_line_width
-		elif x_index % major_every == 0:
-			x_color = grid_major_line_color
-			x_width = major_line_width
+	for x_index in range(-half_width_cells, half_width_cells + 1):
+		var x := float(x_index) * cell_size
+		var x_color := _line_color_for_index(x_index)
+		var x_width := _line_width_for_index(x_index, line_width, major_line_width, super_major_line_width, axis_line_width)
+		var is_border_x := x_index == -half_width_cells or x_index == half_width_cells
+		if is_border_x:
+			x_color = GRID_BORDER_COLOR
+			x_color.a = border_alpha
+			x_width = border_line_width
 
-		draw_line(Vector2(x, rect.position.y), Vector2(x, rect.end.y), x_color, x_width)
-		x += cell_size
-		x_index += 1
+		_add_line(lines_container, Vector2(x, world_min_y), Vector2(x, world_max_y), x_color, x_width)
 
-	var y := rect.position.y
-	var y_index := 0
-	while y <= rect.end.y + 0.5:
-		var y_color := grid_line_color
-		var y_width := line_width
-		if is_zero_approx(y):
-			y_color = grid_axis_color
-			y_width = axis_line_width
-		elif y_index % super_major_every == 0:
-			y_color = grid_super_major_line_color
-			y_width = super_major_line_width
-		elif y_index % major_every == 0:
-			y_color = grid_major_line_color
-			y_width = major_line_width
+	for y_index in range(-half_height_cells, half_height_cells + 1):
+		var y := float(y_index) * cell_size
+		var y_color := _line_color_for_index(y_index)
+		var y_width := _line_width_for_index(y_index, line_width, major_line_width, super_major_line_width, axis_line_width)
+		var is_border_y := y_index == -half_height_cells or y_index == half_height_cells
+		if is_border_y:
+			y_color = GRID_BORDER_COLOR
+			y_color.a = border_alpha
+			y_width = border_line_width
 
-		draw_line(Vector2(rect.position.x, y), Vector2(rect.end.x, y), y_color, y_width)
-		y += cell_size
-		y_index += 1
+		_add_line(lines_container, Vector2(world_min_x, y), Vector2(world_max_x, y), y_color, y_width)
 
-	draw_rect(rect, grid_border_color, false, border_width)
+	_add_rect_outline(lines_container, playable_rect, _with_alpha(GRID_BORDER_COLOR, border_alpha), border_line_width)
+
+func _line_color_for_index(index: int) -> Color:
+	if index == 0:
+		return _with_alpha(GRID_AXIS_COLOR, axis_alpha)
+	if index % maxi(1, super_major_line_every_cells) == 0:
+		return _with_alpha(GRID_SUPER_MAJOR_LINE_COLOR, super_major_line_alpha)
+	if index % maxi(1, major_line_every_cells) == 0:
+		return _with_alpha(GRID_MAJOR_LINE_COLOR, major_line_alpha)
+	return _with_alpha(GRID_LINE_COLOR, line_alpha)
+
+func _line_width_for_index(index: int, base_width: float, major_width: float, super_major_width: float, axis_width: float) -> float:
+	if index == 0:
+		return axis_width
+	if index % maxi(1, super_major_line_every_cells) == 0:
+		return super_major_width
+	if index % maxi(1, major_line_every_cells) == 0:
+		return major_width
+	return base_width
+
+func _with_alpha(color: Color, alpha: float) -> Color:
+	var next := color
+	next.a = alpha
+	return next
+
+func _add_rect_outline(parent: Node, rect: Rect2, color: Color, width: float) -> void:
+	_add_line(parent, rect.position, Vector2(rect.end.x, rect.position.y), color, width)
+	_add_line(parent, Vector2(rect.end.x, rect.position.y), rect.end, color, width)
+	_add_line(parent, rect.end, Vector2(rect.position.x, rect.end.y), color, width)
+	_add_line(parent, Vector2(rect.position.x, rect.end.y), rect.position, color, width)
+
+func _add_line(parent: Node, from_point: Vector2, to_point: Vector2, color: Color, width: float) -> void:
+	var line := Line2D.new()
+	line.width = width
+	line.default_color = color
+	line.antialiased = true
+	line.texture_mode = Line2D.LINE_TEXTURE_NONE
+	line.add_point(from_point)
+	line.add_point(to_point)
+	parent.add_child(line, false, Node.INTERNAL_MODE_FRONT)
+
+func _ensure_lines_container() -> Node2D:
+	var existing := get_node_or_null(LINES_CONTAINER_NAME) as Node2D
+	if existing != null:
+		return existing
+
+	var container := Node2D.new()
+	container.name = LINES_CONTAINER_NAME
+	add_child(container, false, Node.INTERNAL_MODE_FRONT)
+	return container
+
+func _update_grid_visibility() -> void:
+	var lines_container := get_node_or_null(LINES_CONTAINER_NAME) as CanvasItem
+	if lines_container == null:
+		return
+
+	lines_container.visible = Engine.is_editor_hint() or show_in_game
+
+func _build_signature() -> String:
+	return "%s|%s|%s|%s|%s|%s|%s|%s" % [
+		WorldConfig.cell_size(),
+		WorldConfig.world_half_width_cells(),
+		WorldConfig.world_half_height_cells(),
+		line_alpha,
+		major_line_alpha,
+		super_major_line_alpha,
+		axis_alpha,
+		border_alpha,
+	]

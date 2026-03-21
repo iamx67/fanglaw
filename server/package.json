@@ -9,6 +9,8 @@
     "dev": "nodemon --watch src --ext ts --exec \"node --enable-source-maps --loader ts-node/esm\" src/index.ts",
     "build": "tsc -p tsconfig.json",
     "start": "node --enable-source-maps dist/index.js",
+    "migrate": "npm run build && node --enable-source-maps --input-type=module -e \"import { resolve } from 'node:path'; import { pathToFileURL } from 'node:url'; await import(pathToFileURL(resolve(process.cwd(), 'dist/scripts/migrate.js')).href);\"",
+    "migrate:status": "npm run build && node --enable-source-maps --input-type=module -e \"import { resolve } from 'node:path'; import { pathToFileURL } from 'node:url'; await import(pathToFileURL(resolve(process.cwd(), 'dist/scripts/migrateStatus.js')).href);\"",
     "migrate:json-to-postgres": "npm run build && node --enable-source-maps --input-type=module -e \"import { resolve } from 'node:path'; import { pathToFileURL } from 'node:url'; await import(pathToFileURL(resolve(process.cwd(), 'dist/scripts/migrateJsonToPostgres.js')).href);\""
   },
   "dependencies": {

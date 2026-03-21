@@ -19,6 +19,8 @@ type RawPreySearchZone = {
   name?: string;
   searchZoneId?: string;
   locationId?: string;
+  preyProfileId?: string;
+  preyVisualId?: string;
   preyKind?: string;
   spawnTag?: string;
   requiredSkill?: string;
@@ -60,6 +62,8 @@ export type PreySearchZone = {
   name: string;
   searchZoneId: string;
   locationId: string;
+  preyProfileId: string;
+  preyVisualId: string;
   preyKind: string;
   spawnTag: string;
   requiredSkill: string;
@@ -206,6 +210,8 @@ function normalizePreySearchZones(rawZones: RawPreySearchZone[] | undefined) {
       name: typeof rawZone?.name === "string" ? rawZone.name : "",
       searchZoneId: typeof rawZone?.searchZoneId === "string" ? rawZone.searchZoneId.trim() : "",
       locationId: typeof rawZone?.locationId === "string" ? rawZone.locationId.trim() : "",
+      preyProfileId: typeof rawZone?.preyProfileId === "string" ? rawZone.preyProfileId.trim() : "",
+      preyVisualId: typeof rawZone?.preyVisualId === "string" ? rawZone.preyVisualId.trim() : "",
       preyKind: typeof rawZone?.preyKind === "string" ? rawZone.preyKind.trim() : "",
       spawnTag: typeof rawZone?.spawnTag === "string" ? rawZone.spawnTag.trim() : "",
       requiredSkill: typeof rawZone?.requiredSkill === "string" ? rawZone.requiredSkill.trim() : "",

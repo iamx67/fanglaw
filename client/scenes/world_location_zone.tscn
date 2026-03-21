@@ -1,12 +1,17 @@
-[gd_scene format=4]
+[gd_scene format=3 uid="uid://cmcpcau3y7kwr"]
 
-[ext_resource type="Script" path="res://scripts/world_location_zone.gd" id="1_world_location_zone"]
+[ext_resource type="Script" uid="uid://dygpy4pcxa7j6" path="res://scripts/world_location_zone.gd" id="1_world_location_zone"]
 
 [sub_resource type="RectangleShape2D" id="RectangleShape2D_default"]
-size = Vector2(512, 512)
+size = Vector2(2200, 1300)
 
-[node name="WorldLocationZone" type="Area2D"]
+[node name="WorldLocationZone" type="Area2D" unique_id=2039161989]
+collision_layer = 0
+collision_mask = 0
+monitoring = false
+monitorable = false
 script = ExtResource("1_world_location_zone")
 
-[node name="CollisionShape2D" type="CollisionShape2D" parent="."]
+[node name="CollisionShape2D" type="CollisionShape2D" parent="." unique_id=2051422786]
+position = Vector2(0, 0)
 shape = SubResource("RectangleShape2D_default")

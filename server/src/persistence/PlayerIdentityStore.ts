@@ -1,16 +1,21 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { ensureConfiguredDatabaseMigrations } from "../migrations/bootstrap.js";
 
 export type PlayerIdentity = {
   playerId: string;
   accountType: "guest" | "account";
   name: string;
+  siteUsername: string;
+  tribe: string;
+  gender: string;
   x: number;
   y: number;
   facing: "left" | "right";
   appearanceJson: string;
   appearanceLocked: boolean;
+  skillsJson: string;
   createdAt: number;
   updatedAt: number;
 };
@@ -23,6 +28,12 @@ export type PlayerSnapshot = {
   facing: "left" | "right";
 };
 
+export type PlayerSiteProfileInput = {
+  username?: string;
+  tribe?: string;
+  gender?: string;
+};
+
 export interface PlayerIdentityStoreBackend {
   load(): Promise<void>;
   getProfile(playerId: string): PlayerIdentity | null;
@@ -33,7 +44,9 @@ export interface PlayerIdentityStoreBackend {
   ): PlayerIdentity;
   getOrCreateGuestProfile(playerId: string, suggestedName?: string): PlayerIdentity;
   savePlayerSnapshot(snapshot: PlayerSnapshot): PlayerIdentity;
+  saveSiteProfile(playerId: string, input: PlayerSiteProfileInput): PlayerIdentity;
   saveAppearanceOnce(playerId: string, appearance: unknown): PlayerIdentity;
+  saveSkillProgress(playerId: string, skillId: string, xpDelta: number): PlayerIdentity;
   flush(): Promise<void>;
 }
 
@@ -44,6 +57,18 @@ type StoredPlayersFile = {
 
 const FLUSH_DEBOUNCE_MS = 750;
 const MAX_APPEARANCE_JSON_BYTES = 24_000;
+const MAX_SKILLS_JSON_BYTES = 24_000;
+const MAX_SITE_USERNAME_CHARS = 32;
+const MAX_SITE_META_CHARS = 48;
+
+type StoredSkillEntry = {
+  xp: number;
+};
+
+type StoredSkillsPayload = {
+  version: 1;
+  skills: Record<string, StoredSkillEntry>;
+};
 
 export class PlayerIdentityStoreError extends Error {
   constructor(
@@ -84,11 +109,15 @@ class FilePlayerIdentityStore implements PlayerIdentityStoreBackend {
             playerId,
             accountType: normalizeStoredAccountType(profile.accountType),
             name: normalizeStoredName(profile.name),
+            siteUsername: normalizeStoredSiteUsername(profile.siteUsername),
+            tribe: normalizeStoredTribe(profile.tribe),
+            gender: normalizeStoredGender(profile.gender),
             x: normalizeStoredNumber(profile.x),
             y: normalizeStoredNumber(profile.y),
             facing: normalizeStoredFacing(profile.facing),
             appearanceJson: normalizeStoredAppearanceJson(profile.appearanceJson),
             appearanceLocked: normalizeStoredAppearanceLocked(profile.appearanceLocked),
+            skillsJson: normalizeStoredSkillsJson(profile.skillsJson),
             createdAt: normalizeStoredTimestamp(profile.createdAt),
             updatedAt: normalizeStoredTimestamp(profile.updatedAt),
           });
@@ -140,11 +169,15 @@ class FilePlayerIdentityStore implements PlayerIdentityStoreBackend {
       playerId,
       accountType,
       name: suggestedName ? nextName : "Cat",
+      siteUsername: "",
+      tribe: "",
+      gender: "",
       x: 0,
       y: 0,
       facing: "right",
       appearanceJson: "",
       appearanceLocked: false,
+      skillsJson: "",
       createdAt: now,
       updatedAt: now,
     };
@@ -196,6 +229,35 @@ class FilePlayerIdentityStore implements PlayerIdentityStoreBackend {
     return profile;
   }
 
+  saveSiteProfile(playerId: string, input: PlayerSiteProfileInput) {
+    const profile = this.getOrCreateProfile(playerId, "", "account");
+    const nextSiteUsername = normalizeStoredSiteUsername(input.username);
+    const nextTribe = normalizeStoredTribe(input.tribe);
+    const nextGender = normalizeStoredGender(input.gender);
+    let changed = false;
+
+    if (profile.siteUsername !== nextSiteUsername) {
+      profile.siteUsername = nextSiteUsername;
+      changed = true;
+    }
+
+    if (profile.tribe !== nextTribe) {
+      profile.tribe = nextTribe;
+      changed = true;
+    }
+
+    if (profile.gender !== nextGender) {
+      profile.gender = nextGender;
+      changed = true;
+    }
+
+    if (changed) {
+      this.touch(profile);
+    }
+
+    return profile;
+  }
+
   saveAppearanceOnce(playerId: string, appearance: unknown) {
     const profile = this.getOrCreateProfile(playerId, "", "account");
     if (profile.appearanceLocked || profile.appearanceJson) {
@@ -204,6 +266,18 @@ class FilePlayerIdentityStore implements PlayerIdentityStoreBackend {
 
     profile.appearanceJson = serializeAppearancePayload(appearance);
     profile.appearanceLocked = true;
+    this.touch(profile);
+    return profile;
+  }
+
+  saveSkillProgress(playerId: string, skillId: string, xpDelta: number) {
+    const profile = this.getOrCreateProfile(playerId, "", "account");
+    const nextSkillsJson = addSkillXpToStoredSkillsJson(profile.skillsJson, skillId, xpDelta);
+    if (profile.skillsJson === nextSkillsJson) {
+      return profile;
+    }
+
+    profile.skillsJson = nextSkillsJson;
     this.touch(profile);
     return profile;
   }
@@ -265,6 +339,7 @@ class RuntimePlayerIdentityStore implements PlayerIdentityStoreBackend {
 
     if (this.databaseUrl) {
       try {
+        await ensureConfiguredDatabaseMigrations(this.databaseUrl, this.databaseSsl);
         const { PostgresPlayerIdentityStore } = await import("./PostgresPlayerIdentityStore.js");
         this.backend = new PostgresPlayerIdentityStore({
           databaseUrl: this.databaseUrl,
@@ -316,8 +391,16 @@ class RuntimePlayerIdentityStore implements PlayerIdentityStoreBackend {
     return this.requireBackend().savePlayerSnapshot(snapshot);
   }
 
+  saveSiteProfile(playerId: string, input: PlayerSiteProfileInput) {
+    return this.requireBackend().saveSiteProfile(playerId, input);
+  }
+
   saveAppearanceOnce(playerId: string, appearance: unknown) {
     return this.requireBackend().saveAppearanceOnce(playerId, appearance);
+  }
+
+  saveSkillProgress(playerId: string, skillId: string, xpDelta: number) {
+    return this.requireBackend().saveSkillProgress(playerId, skillId, xpDelta);
   }
 
   async flush() {
@@ -341,11 +424,15 @@ function serializePlayersFile(players: Map<string, PlayerIdentity>): StoredPlaye
       playerId,
       accountType: normalizeStoredAccountType(profile.accountType),
       name: normalizeStoredName(profile.name),
+      siteUsername: normalizeStoredSiteUsername(profile.siteUsername),
+      tribe: normalizeStoredTribe(profile.tribe),
+      gender: normalizeStoredGender(profile.gender),
       x: normalizeStoredNumber(profile.x),
       y: normalizeStoredNumber(profile.y),
       facing: normalizeStoredFacing(profile.facing),
       appearanceJson: normalizeStoredAppearanceJson(profile.appearanceJson),
       appearanceLocked: normalizeStoredAppearanceLocked(profile.appearanceLocked),
+      skillsJson: normalizeStoredSkillsJson(profile.skillsJson),
       createdAt: normalizeStoredTimestamp(profile.createdAt),
       updatedAt: normalizeStoredTimestamp(profile.updatedAt),
     };
@@ -368,6 +455,30 @@ export function normalizeStoredName(value: unknown) {
 
   const normalized = value.trim().slice(0, 16);
   return normalized || "Cat";
+}
+
+export function normalizeStoredSiteUsername(value: unknown) {
+  if (typeof value !== "string") {
+    return "";
+  }
+
+  return value.trim().slice(0, MAX_SITE_USERNAME_CHARS);
+}
+
+export function normalizeStoredTribe(value: unknown) {
+  if (typeof value !== "string") {
+    return "";
+  }
+
+  return value.trim().slice(0, MAX_SITE_META_CHARS);
+}
+
+export function normalizeStoredGender(value: unknown) {
+  if (typeof value !== "string") {
+    return "";
+  }
+
+  return value.trim().slice(0, MAX_SITE_META_CHARS);
 }
 
 export function normalizeStoredNumber(value: unknown) {
@@ -404,6 +515,19 @@ export function normalizeStoredAppearanceJson(value: unknown) {
 
 export function normalizeStoredAppearanceLocked(value: unknown) {
   return value === true;
+}
+
+export function normalizeStoredSkillsJson(value: unknown) {
+  if (typeof value !== "string") {
+    return "";
+  }
+
+  const normalized = value.trim();
+  if (!normalized) {
+    return "";
+  }
+
+  return normalized.slice(0, MAX_SKILLS_JSON_BYTES);
 }
 
 export function normalizeStoredTimestamp(value: unknown) {
@@ -456,6 +580,81 @@ export function parseStoredAppearanceJson(appearanceJson: string) {
   } catch {
     return null;
   }
+}
+
+export function parseStoredSkillsJson(skillsJson: string): StoredSkillsPayload {
+  const normalized = normalizeStoredSkillsJson(skillsJson);
+  if (!normalized) {
+    return createEmptySkillsPayload();
+  }
+
+  try {
+    const parsed = JSON.parse(normalized) as Partial<StoredSkillsPayload>;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return createEmptySkillsPayload();
+    }
+
+    const skills: Record<string, StoredSkillEntry> = {};
+    const rawSkills = parsed.skills;
+    if (rawSkills && typeof rawSkills === "object" && !Array.isArray(rawSkills)) {
+      for (const [rawSkillId, rawSkillEntry] of Object.entries(rawSkills)) {
+        const skillId = normalizeStoredSkillId(rawSkillId);
+        if (!skillId || !rawSkillEntry || typeof rawSkillEntry !== "object" || Array.isArray(rawSkillEntry)) {
+          continue;
+        }
+
+        skills[skillId] = {
+          xp: Math.max(0, normalizeStoredNumber((rawSkillEntry as Partial<StoredSkillEntry>).xp)),
+        };
+      }
+    }
+
+    return {
+      version: 1,
+      skills,
+    };
+  } catch {
+    return createEmptySkillsPayload();
+  }
+}
+
+export function addSkillXpToStoredSkillsJson(skillsJson: string, skillId: string, xpDelta: number) {
+  const normalizedSkillId = normalizeStoredSkillId(skillId);
+  const normalizedXpDelta = Math.max(0, normalizeStoredNumber(xpDelta));
+  if (!normalizedSkillId || normalizedXpDelta <= 0) {
+    return normalizeStoredSkillsJson(skillsJson);
+  }
+
+  const payload = parseStoredSkillsJson(skillsJson);
+  const existingEntry = payload.skills[normalizedSkillId] ?? { xp: 0 };
+  payload.skills[normalizedSkillId] = {
+    xp: Math.max(0, existingEntry.xp + normalizedXpDelta),
+  };
+
+  return serializeStoredSkillsPayload(payload);
+}
+
+function serializeStoredSkillsPayload(payload: StoredSkillsPayload) {
+  const serialized = JSON.stringify({
+    version: 1,
+    skills: payload.skills,
+  });
+  return serialized.length > MAX_SKILLS_JSON_BYTES ? "" : serialized;
+}
+
+function createEmptySkillsPayload(): StoredSkillsPayload {
+  return {
+    version: 1,
+    skills: {},
+  };
+}
+
+function normalizeStoredSkillId(value: unknown) {
+  if (typeof value !== "string") {
+    return "";
+  }
+
+  return value.trim().toLowerCase().replace(/[^a-z0-9_-]/g, "").slice(0, 64);
 }
 
 function isMissingFileError(error: unknown): error is NodeJS.ErrnoException {

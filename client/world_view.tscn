@@ -2,16 +2,29 @@
 
 [ext_resource type="Script" uid="uid://cs73isrjo1pyk" path="res://scripts/world_view.gd" id="1_world_view"]
 [ext_resource type="Texture2D" uid="uid://bshppd0nb7qel" path="res://assets/backgrounds/травасвет2.png" id="2_background"]
+[ext_resource type="Texture2D" uid="uid://cfb41ft43xu0a" path="res://assets/characters/tails/base/tails1.png" id="4_bu154"]
 [ext_resource type="Script" uid="uid://ckiyl22absis4" path="res://scripts/world_bounds.gd" id="4_world_bounds"]
+[ext_resource type="Texture2D" uid="uid://caqqgp1axby8r" path="res://assets/characters/tails/shadows/tails1shadow.png" id="5_0sd5k"]
 [ext_resource type="PackedScene" path="res://scenes/player_avatar.tscn" id="5_player_avatar"]
+[ext_resource type="Texture2D" uid="uid://cipv8rvydqycc" path="res://assets/characters/tails/contours/tails1co.png" id="6_uxovr"]
 [ext_resource type="Script" uid="uid://g5xpdgcrrqpu" path="res://scripts/world_blockers.gd" id="6_world_blockers"]
+[ext_resource type="Texture2D" uid="uid://bgr06arna5b24" path="res://assets/characters/body/base/bodybase.png" id="7_am2ju"]
 [ext_resource type="Script" uid="uid://18sy80goct64" path="res://scripts/world_settings.gd" id="7_world_settings"]
+[ext_resource type="Texture2D" uid="uid://baispynh7a2d2" path="res://assets/characters/patterns/body/eyeswhite.png" id="8_oqxb6"]
 [ext_resource type="Script" uid="uid://caj8b6j3yfin" path="res://scripts/world_location_zones.gd" id="8_world_location_zones"]
+[ext_resource type="Texture2D" uid="uid://cevow6xepg5jq" path="res://assets/characters/patterns/body/pattern12nose.png" id="9_fq77y"]
 [ext_resource type="Script" uid="uid://bnpj5s6lq6af2" path="res://scripts/prey_search_zones.gd" id="9_prey_search_zones"]
+[ext_resource type="Texture2D" uid="uid://dymbm0nhgapp4" path="res://assets/characters/body/shadows/bodybaseshadow.png" id="10_16fwe"]
 [ext_resource type="Script" uid="uid://2nm1p3pd445c" path="res://scripts/world_spawn_points.gd" id="10_world_spawn_points"]
+[ext_resource type="Texture2D" uid="uid://ct6t0w56jlqig" path="res://assets/characters/body/contours/bodybaseco.png" id="11_5btqr"]
 [ext_resource type="Script" uid="uid://b4in4gwgqdkll" path="res://scripts/world_grid.gd" id="11_world_grid"]
+[ext_resource type="Texture2D" uid="uid://tt2c61ulemwa" path="res://assets/characters/ears/ears1.png" id="12_1aiyd"]
 [ext_resource type="PackedScene" uid="uid://fwwvh7fopdwk" path="res://scenes/prey_avatar.tscn" id="12_prey_avatar"]
 [ext_resource type="PackedScene" path="res://scenes/bush.tscn" id="13_bush"]
+[ext_resource type="Texture2D" uid="uid://b7sqhxoecbq4f" path="res://assets/characters/ears/contours/ears1co.png" id="13_e3bca"]
+[ext_resource type="Texture2D" uid="uid://6x1sgp27k4xh" path="res://assets/creatures/mouse1.png" id="14_prey_mouse"]
+[ext_resource type="Texture2D" uid="uid://d1vmq1w55ndab" path="res://assets/creatures/kulik.png" id="15_prey_kulik"]
+[ext_resource type="Script" path="res://scripts/scent_trail.gd" id="16_scent_trail"]
 
 [sub_resource type="RectangleShape2D" id="RectangleShape2D_horizontal_wall"]
 size = Vector2(32512, 256)
@@ -42,6 +55,54 @@ y_sort_enabled = true
 editor_preview_only = true
 editor_preview_name = "Preview"
 
+[node name="CharacterRoot" parent="DepthObjects/PlayerPreview" index="0"]
+position = Vector2(0, -89.565)
+scale = Vector2(0.21, 0.21)
+
+[node name="TailBaseSprite" parent="DepthObjects/PlayerPreview/CharacterRoot" index="0"]
+modulate = Color(0.96862745, 0.9490196, 0.9254902, 1)
+texture = ExtResource("4_bu154")
+
+[node name="TailShadowSprite" parent="DepthObjects/PlayerPreview/CharacterRoot" index="2"]
+texture = ExtResource("5_0sd5k")
+
+[node name="TailContourSprite" parent="DepthObjects/PlayerPreview/CharacterRoot" index="3"]
+texture = ExtResource("6_uxovr")
+
+[node name="BodyBaseSprite" parent="DepthObjects/PlayerPreview/CharacterRoot" index="4"]
+modulate = Color(0.96862745, 0.9490196, 0.9254902, 1)
+texture = ExtResource("7_am2ju")
+
+[node name="EyesBaseSprite" parent="DepthObjects/PlayerPreview/CharacterRoot" index="6"]
+modulate = Color(0.56078434, 0.6313726, 0.6784314, 1)
+texture = ExtResource("8_oqxb6")
+
+[node name="NoseSprite" parent="DepthObjects/PlayerPreview/CharacterRoot" index="7"]
+modulate = Color(0.84313726, 0.7137255, 0.6784314, 1)
+texture = ExtResource("9_fq77y")
+
+[node name="BodyShadowSprite" parent="DepthObjects/PlayerPreview/CharacterRoot" index="8"]
+texture = ExtResource("10_16fwe")
+
+[node name="BodyContourSprite" parent="DepthObjects/PlayerPreview/CharacterRoot" index="9"]
+texture = ExtResource("11_5btqr")
+
+[node name="CheeksSprite" parent="DepthObjects/PlayerPreview/CharacterRoot" index="10"]
+visible = false
+
+[node name="ManeBaseSprite" parent="DepthObjects/PlayerPreview/CharacterRoot" index="11"]
+visible = false
+
+[node name="ManeContourSprite" parent="DepthObjects/PlayerPreview/CharacterRoot" index="12"]
+visible = false
+
+[node name="EarsBaseSprite" parent="DepthObjects/PlayerPreview/CharacterRoot" index="13"]
+modulate = Color(0.96862745, 0.9490196, 0.9254902, 1)
+texture = ExtResource("12_1aiyd")
+
+[node name="EarsContourSprite" parent="DepthObjects/PlayerPreview/CharacterRoot" index="14"]
+texture = ExtResource("13_e3bca")
+
 [node name="NameLabel" parent="DepthObjects/PlayerPreview" index="2"]
 text = "Preview"
 
@@ -52,15 +113,31 @@ editor_preview_only = true
 [node name="Sprite2D" parent="DepthObjects/BushPreview" index="0"]
 position = Vector2(0, -133)
 
-[node name="PreyPreview" parent="DepthObjects" unique_id=1611461697 instance=ExtResource("12_prey_avatar")]
-position = Vector2(256, 0)
+[node name="PreyVisualLibrary" type="Node2D" parent="DepthObjects" unique_id=984630255]
+visible = false
+
+[node name="PreyVisual_mouse" parent="DepthObjects/PreyVisualLibrary" unique_id=2078488361 instance=ExtResource("12_prey_avatar")]
 editor_preview_only = true
+visual_texture = ExtResource("14_prey_mouse")
+
+[node name="PreyVisual_kulik" parent="DepthObjects/PreyVisualLibrary" unique_id=1146300920 instance=ExtResource("12_prey_avatar")]
+position = Vector2(128, 0)
+editor_preview_only = true
+editor_preview_visual_id = "kulik"
+editor_preview_kind = "bird"
+visual_texture = ExtResource("15_prey_kulik")
 
 [node name="Backgrounds" type="Node2D" parent="." unique_id=1806669005]
 z_index = -100
 
 [node name="Map" type="Node2D" parent="." unique_id=829624274]
 z_index = -50
+
+[node name="BiomeTransitions" type="Node2D" parent="Map" unique_id=1288401172]
+
+[node name="ScentTrail" type="Node2D" parent="."]
+z_index = 29
+script = ExtResource("16_scent_trail")
 
 [node name="Blockers" type="Node2D" parent="." unique_id=273289115]
 z_index = 45
@@ -125,4 +202,3 @@ script = ExtResource("11_world_grid")
 
 [editable path="DepthObjects/PlayerPreview"]
 [editable path="DepthObjects/BushPreview"]
-[editable path="DepthObjects/PreyPreview"]

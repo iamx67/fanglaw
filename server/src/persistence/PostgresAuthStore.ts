@@ -1,11 +1,13 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import {
   AuthStoreError,
+  type AuthCreateCharacterInput,
   assertCharacterName,
   assertEmail,
   assertPassword,
   hashPassword,
   normalizeCharacterName,
+  normalizeOptionalCharacterId,
   normalizeSessionToken,
   type AuthAccount,
   type AuthCharacter,
@@ -44,7 +46,7 @@ CREATE TABLE IF NOT EXISTS auth_accounts (
   password_salt TEXT NOT NULL,
   created_at BIGINT NOT NULL,
   updated_at BIGINT NOT NULL,
-  active_character_id TEXT NOT NULL
+  active_character_id TEXT
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS auth_accounts_email_lower_idx
@@ -64,7 +66,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS auth_characters_name_lower_idx
 CREATE TABLE IF NOT EXISTS auth_sessions (
   token TEXT PRIMARY KEY,
   account_id TEXT NOT NULL REFERENCES auth_accounts(account_id) ON DELETE CASCADE,
-  character_id TEXT NOT NULL REFERENCES auth_characters(character_id) ON DELETE CASCADE,
+  character_id TEXT REFERENCES auth_characters(character_id) ON DELETE CASCADE,
   created_at BIGINT NOT NULL,
   updated_at BIGINT NOT NULL
 );
@@ -74,6 +76,12 @@ CREATE INDEX IF NOT EXISTS auth_sessions_account_id_idx
 
 CREATE INDEX IF NOT EXISTS auth_sessions_character_id_idx
   ON auth_sessions (character_id);
+
+ALTER TABLE auth_accounts
+  ALTER COLUMN active_character_id DROP NOT NULL;
+
+ALTER TABLE auth_sessions
+  ALTER COLUMN character_id DROP NOT NULL;
 `;
 
 export class PostgresAuthStore implements AuthStoreBackend {
@@ -103,13 +111,11 @@ export class PostgresAuthStore implements AuthStoreBackend {
   async register(input: AuthRegistrationInput): Promise<AuthMutationResult> {
     const email = assertEmail(input.email);
     const password = assertPassword(input.password);
-    const characterName = assertCharacterName(input.characterName);
     const now = Date.now();
     const accountId = randomUUID();
-    const characterId = randomUUID();
     const passwordSalt = randomBytes(16).toString("hex");
     const passwordHash = hashPassword(password, passwordSalt);
-    const session = createSession(accountId, characterId, now);
+    const session = createSession(accountId, null, now);
 
     return await this.withTransaction(async (client) => {
       const existingAccount = await client.query(
@@ -120,26 +126,11 @@ export class PostgresAuthStore implements AuthStoreBackend {
         throw new AuthStoreError("Email is already registered", "EMAIL_TAKEN");
       }
 
-      const existingCharacter = await client.query(
-        "SELECT character_id FROM auth_characters WHERE LOWER(name) = LOWER($1) LIMIT 1",
-        [characterName],
-      );
-      if ((existingCharacter.rowCount ?? 0) > 0) {
-        throw new AuthStoreError("Character name is already taken", "NAME_TAKEN");
-      }
-
       await client.query(
         `INSERT INTO auth_accounts (
           account_id, email, password_hash, password_salt, created_at, updated_at, active_character_id
         ) VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-        [accountId, email, passwordHash, passwordSalt, now, now, characterId],
-      );
-
-      await client.query(
-        `INSERT INTO auth_characters (
-          character_id, account_id, name, created_at, updated_at
-        ) VALUES ($1, $2, $3, $4, $5)`,
-        [characterId, accountId, characterName, now, now],
+        [accountId, email, passwordHash, passwordSalt, now, now, null],
       );
 
       await client.query(
@@ -157,15 +148,9 @@ export class PostgresAuthStore implements AuthStoreBackend {
           passwordSalt,
           createdAt: now,
           updatedAt: now,
-          activeCharacterId: characterId,
+          activeCharacterId: null,
         },
-        character: {
-          characterId,
-          accountId,
-          name: characterName,
-          createdAt: now,
-          updatedAt: now,
-        },
+        character: null,
         session,
       };
     });
@@ -201,26 +186,8 @@ export class PostgresAuthStore implements AuthStoreBackend {
         throw new AuthStoreError("Invalid email or password", "AUTH_FAILED");
       }
 
-      const characterResult = await client.query<DatabaseRow>(
-        `SELECT
-          character_id,
-          account_id,
-          name,
-          created_at,
-          updated_at
-        FROM auth_characters
-        WHERE character_id = $1
-        LIMIT 1`,
-        [account.activeCharacterId],
-      );
-
-      const characterRow = characterResult.rows[0];
-      if (!characterRow) {
-        throw new AuthStoreError("Character is missing for this account", "AUTH_FAILED");
-      }
-
-      const character = mapCharacterRow(characterRow);
-      const session = createSession(account.accountId, character.characterId);
+      const character = await this.getActiveCharacterForAccount(client, account);
+      const session = createSession(account.accountId, character?.characterId ?? null);
 
       await client.query(
         `INSERT INTO auth_sessions (
@@ -237,6 +204,102 @@ export class PostgresAuthStore implements AuthStoreBackend {
     });
   }
 
+  async createCharacter(input: AuthCreateCharacterInput): Promise<AuthMutationResult> {
+    const normalizedToken = normalizeSessionToken(input.sessionToken);
+    const characterName = assertCharacterName(input.characterName);
+    if (!normalizedToken) {
+      throw new AuthStoreError("Session token is invalid", "SESSION_NOT_FOUND");
+    }
+
+    return await this.withTransaction(async (client) => {
+      const accountResult = await client.query<DatabaseRow>(
+        `SELECT
+          s.token,
+          s.account_id,
+          s.character_id,
+          s.created_at AS session_created_at,
+          s.updated_at AS session_updated_at,
+          a.email,
+          a.password_hash,
+          a.password_salt,
+          a.created_at,
+          a.updated_at,
+          a.active_character_id
+        FROM auth_sessions s
+        JOIN auth_accounts a ON a.account_id = s.account_id
+        WHERE s.token = $1
+        LIMIT 1`,
+        [normalizedToken],
+      );
+
+      const accountRow = accountResult.rows[0];
+      if (!accountRow) {
+        throw new AuthStoreError("Session token is invalid", "SESSION_NOT_FOUND");
+      }
+
+      const account = mapAccountRow(accountRow);
+      const existingCharacter = await this.getActiveCharacterForAccount(client, account);
+      if (existingCharacter) {
+        throw new AuthStoreError("Character is already created for this account", "CHARACTER_EXISTS");
+      }
+
+      const existingName = await client.query(
+        "SELECT character_id FROM auth_characters WHERE LOWER(name) = LOWER($1) LIMIT 1",
+        [characterName],
+      );
+      if ((existingName.rowCount ?? 0) > 0) {
+        throw new AuthStoreError("Character name is already taken", "NAME_TAKEN");
+      }
+
+      const now = Date.now();
+      const characterId = randomUUID();
+      const character: AuthCharacter = {
+        characterId,
+        accountId: account.accountId,
+        name: characterName,
+        createdAt: now,
+        updatedAt: now,
+      };
+
+      await client.query(
+        `INSERT INTO auth_characters (
+          character_id, account_id, name, created_at, updated_at
+        ) VALUES ($1, $2, $3, $4, $5)`,
+        [character.characterId, character.accountId, character.name, character.createdAt, character.updatedAt],
+      );
+
+      await client.query(
+        `UPDATE auth_accounts
+         SET active_character_id = $2, updated_at = $3
+         WHERE account_id = $1`,
+        [account.accountId, character.characterId, now],
+      );
+
+      await client.query(
+        `UPDATE auth_sessions
+         SET character_id = $2, updated_at = $3
+         WHERE token = $1`,
+        [normalizedToken, character.characterId, now],
+      );
+
+      return {
+        account: {
+          ...account,
+          activeCharacterId: character.characterId,
+          updatedAt: now,
+        },
+        character,
+        session: {
+          token: normalizedToken,
+          accountId: account.accountId,
+          characterId: character.characterId,
+          createdAt: numberValue(accountRow.session_created_at),
+          updatedAt: now,
+        },
+      };
+    });
+  }
+
   async getAuthBySessionToken(sessionToken: string): Promise<AuthContextData> {
     const normalizedToken = normalizeSessionToken(sessionToken);
     if (!normalizedToken) {
@@ -249,11 +312,13 @@ export class PostgresAuthStore implements AuthStoreBackend {
           s.token,
           a.account_id,
           a.email,
+          a.active_character_id,
           c.character_id,
           c.name
         FROM auth_sessions s
         JOIN auth_accounts a ON a.account_id = s.account_id
-        JOIN auth_characters c ON c.character_id = s.character_id
+        LEFT JOIN auth_characters c
+          ON c.character_id = COALESCE(s.character_id, a.active_character_id)
         WHERE s.token = $1
         LIMIT 1`,
         [normalizedToken],
@@ -271,9 +336,9 @@ export class PostgresAuthStore implements AuthStoreBackend {
 
       return {
         accountId: stringValue(row.account_id),
-        characterId: stringValue(row.character_id),
+        characterId: normalizeOptionalCharacterId(row.character_id),
         email: stringValue(row.email),
-        characterName: normalizeCharacterName(row.name),
+        characterName: normalizeOptionalCharacterName(row.name),
         sessionToken: stringValue(row.token),
       };
     });
@@ -309,6 +374,28 @@ export class PostgresAuthStore implements AuthStoreBackend {
     return this.pool;
   }
 
+  private async getActiveCharacterForAccount(client: PoolClientLike, account: AuthAccount) {
+    if (!account.activeCharacterId) {
+      return null;
+    }
+
+    const characterResult = await client.query<DatabaseRow>(
+      `SELECT
+        character_id,
+        account_id,
+        name,
+        created_at,
+        updated_at
+      FROM auth_characters
+      WHERE character_id = $1
+      LIMIT 1`,
+      [account.activeCharacterId],
+    );
+
+    const characterRow = characterResult.rows[0];
+    return characterRow ? mapCharacterRow(characterRow) : null;
+  }
+
   private async importPgModule() {
     try {
       return await import("pg");
@@ -321,7 +408,7 @@ export class PostgresAuthStore implements AuthStoreBackend {
   }
 }
 
-function createSession(accountId: string, characterId: string, now = Date.now()): AuthSession {
+function createSession(accountId: string, characterId: string | null, now = Date.now()): AuthSession {
   return {
     token: randomBytes(32).toString("hex"),
     accountId,
@@ -339,7 +426,7 @@ function mapAccountRow(row: DatabaseRow): AuthAccount {
     passwordSalt: stringValue(row.password_salt),
     createdAt: numberValue(row.created_at),
     updatedAt: numberValue(row.updated_at),
-    activeCharacterId: stringValue(row.active_character_id),
+    activeCharacterId: normalizeOptionalCharacterId(row.active_character_id),
   };
 }
 
@@ -355,6 +442,11 @@ function mapCharacterRow(row: DatabaseRow): AuthCharacter {
 
 function stringValue(value: unknown) {
   return typeof value === "string" ? value : "";
+}
+
+function normalizeOptionalCharacterName(value: unknown) {
+  const normalized = normalizeCharacterName(value);
+  return normalized || null;
 }
 
 function numberValue(value: unknown) {

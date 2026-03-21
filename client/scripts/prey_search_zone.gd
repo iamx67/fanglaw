@@ -8,6 +8,8 @@ const MIN_ZONE_SIZE := 1.0
 
 @export var search_zone_id := "search_zone_01"
 @export var location_id := ""
+@export var prey_profile_id := ""
+@export var prey_visual_id := ""
 @export var prey_kind := "mouse"
 @export var spawn_tag := "default"
 @export var required_skill := "hunting"
@@ -65,6 +67,8 @@ func build_export_zone() -> Dictionary:
 		"name": name,
 		"searchZoneId": search_zone_id.strip_edges(),
 		"locationId": location_id.strip_edges(),
+		"preyProfileId": prey_profile_id.strip_edges(),
+		"preyVisualId": prey_visual_id.strip_edges(),
 		"preyKind": prey_kind.strip_edges(),
 		"spawnTag": spawn_tag.strip_edges(),
 		"requiredSkill": required_skill.strip_edges(),

@@ -3,7 +3,8 @@ import { createReadStream, existsSync, statSync } from "node:fs";
 import { extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const rootDir = fileURLToPath(new URL("./", import.meta.url));
+const siteRootDir = fileURLToPath(new URL("./", import.meta.url));
+const webExportRootDir = fileURLToPath(new URL("../client/web_export/", import.meta.url));
 const port = 4173;
 
 const contentTypes = {
@@ -18,16 +19,35 @@ const contentTypes = {
   ".ico": "image/x-icon",
 };
 
-function resolvePath(urlPath) {
+function resolvePath(rootDir, urlPath) {
   const cleanPath = urlPath === "/" ? "/index.html" : urlPath;
   const relativePath = normalize(decodeURIComponent(cleanPath)).replace(/^(\.\.[/\\])+/, "");
   return join(rootDir, relativePath);
 }
 
-createServer((req, res) => {
-  const filePath = resolvePath(req.url ?? "/");
+function findExistingFile(urlPath) {
+  const candidateRoots = [siteRootDir, webExportRootDir];
 
-  if (!filePath.startsWith(rootDir) || !existsSync(filePath) || statSync(filePath).isDirectory()) {
+  for (const rootDir of candidateRoots) {
+    const filePath = resolvePath(rootDir, urlPath);
+    if (!filePath.startsWith(rootDir)) {
+      continue;
+    }
+
+    if (!existsSync(filePath) || statSync(filePath).isDirectory()) {
+      continue;
+    }
+
+    return filePath;
+  }
+
+  return null;
+}
+
+createServer((req, res) => {
+  const filePath = findExistingFile(req.url ?? "/");
+
+  if (!filePath) {
     res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
     res.end("Not found");
     return;

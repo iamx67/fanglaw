@@ -25,6 +25,9 @@ const VISUAL_STEP_OVERLAP_RATIO := 1.04
 const GRID_POSITION_EPSILON := 0.1
 const MAX_STAMINA := 100.0
 const MIN_STAMINA_TO_SPRINT := 5.0
+const SPRINT_STAMINA_COST := 5.0
+const HUNTING_SKILL_ID := "hunting"
+const HUNTING_SKILL_LEVEL_REQUIREMENTS := [5.0, 10.0]
 const RANDOM_NAME_LENGTH := 8
 const RANDOM_NAME_ALPHABET := "abcdefghijklmnopqrstuvwxyz"
 const SETTINGS_PATH := "user://catlaw_client.cfg"
@@ -43,6 +46,8 @@ const MOVE_UP_RIGHT_ACTION := &"move_up_right"
 const MOVE_DOWN_LEFT_ACTION := &"move_down_left"
 const MOVE_DOWN_RIGHT_ACTION := &"move_down_right"
 const MOVE_SPRINT_ACTION := &"move_sprint"
+const SHOW_SCENT_TRAIL_ACTION := &"show_scent_trail"
+const SCENT_TRAIL_DURATION_SECONDS := 5.0
 
 enum ConnectionState {
 	OFFLINE,
@@ -62,6 +67,7 @@ class Player extends colyseus.Schema:
 			colyseus.Field.new("y", colyseus.NUMBER),
 			colyseus.Field.new("facing", colyseus.STRING),
 			colyseus.Field.new("appearanceJson", colyseus.STRING),
+			colyseus.Field.new("skillsJson", colyseus.STRING),
 			colyseus.Field.new("stamina", colyseus.NUMBER),
 			colyseus.Field.new("sprinting", colyseus.BOOLEAN),
 			colyseus.Field.new("connected", colyseus.BOOLEAN),
@@ -72,7 +78,10 @@ class Prey extends colyseus.Schema:
 		return [
 			colyseus.Field.new("preyId", colyseus.STRING),
 			colyseus.Field.new("kind", colyseus.STRING),
+			colyseus.Field.new("visualId", colyseus.STRING),
+			colyseus.Field.new("behaviorType", colyseus.STRING),
 			colyseus.Field.new("state", colyseus.STRING),
+			colyseus.Field.new("watching", colyseus.BOOLEAN),
 			colyseus.Field.new("searchZoneId", colyseus.STRING),
 			colyseus.Field.new("x", colyseus.NUMBER),
 			colyseus.Field.new("y", colyseus.NUMBER),
@@ -90,8 +99,13 @@ class RoomState extends colyseus.Schema:
 @onready var stamina_hud: Control = $ActionLayer/ActionOverlay/TopLeft/StaminaPanel
 @onready var stamina_label: Label = $ActionLayer/ActionOverlay/TopLeft/StaminaPanel/Margin/VBox/StaminaLabel
 @onready var stamina_bar: ProgressBar = $ActionLayer/ActionOverlay/TopLeft/StaminaPanel/Margin/VBox/StaminaBar
+@onready var hunting_skill_title_label: Label = $ActionLayer/ActionOverlay/TopLeft/StaminaPanel/Margin/VBox/HuntingSkillTitle
+@onready var hunting_skill_level_label: Label = $ActionLayer/ActionOverlay/TopLeft/StaminaPanel/Margin/VBox/HuntingSkillLevelLabel
+@onready var hunting_skill_progress_label: Label = $ActionLayer/ActionOverlay/TopLeft/StaminaPanel/Margin/VBox/HuntingSkillProgressLabel
+@onready var hunting_skill_bar: ProgressBar = $ActionLayer/ActionOverlay/TopLeft/StaminaPanel/Margin/VBox/HuntingSkillBar
 @onready var action_bottom_center: Control = $ActionLayer/ActionOverlay/BottomCenter
 @onready var search_prey_button: Button = $ActionLayer/ActionOverlay/BottomCenter/SearchPreyButton
+@onready var hunt_status_label: Label = $ActionLayer/ActionOverlay/BottomCenter/HuntStatusLabel
 @onready var auth_overlay: Control = $AuthLayer/AuthOverlay
 @onready var auth_title_label: Label = $AuthLayer/AuthOverlay/Center/Panel/Margin/VBox/Title
 @onready var auth_description_label: Label = $AuthLayer/AuthOverlay/Center/Panel/Margin/VBox/Description
@@ -120,6 +134,7 @@ var avatar_world_positions: Dictionary = {}
 var avatar_step_distances: Dictionary = {}
 var avatar_step_durations: Dictionary = {}
 var prey_avatars: Dictionary = {}
+var prey_states: Dictionary = {}
 var is_connecting := false
 var auto_connect_retry_scheduled := false
 var ping_elapsed := 0.0
@@ -134,10 +149,17 @@ var last_cardinal_direction := Vector2.ZERO
 var move_cooldown_remaining := 0.0
 var auth_login_in_progress := false
 var active_prey_search_zone = null
+var active_location_zone: Node = null
 var local_facing := "right"
 var last_sent_facing := ""
 var local_stamina := MAX_STAMINA
+var local_skills_json := ""
 var local_is_sprinting := false
+var sprint_requires_repress := false
+var sprint_end_reconcile_pending := false
+var sprint_release_sent := false
+var scent_trail_remaining := 0.0
+var hunt_status_remaining := 0.0
 
 func _ready() -> void:
 	focus_mode = Control.FOCUS_ALL
@@ -171,9 +193,19 @@ func _physics_process(delta: float) -> void:
 func _process(delta: float) -> void:
 	if room != null and room.has_joined():
 		move_cooldown_remaining = maxf(0.0, move_cooldown_remaining - delta)
+		scent_trail_remaining = maxf(0.0, scent_trail_remaining - delta)
+		if Input.is_action_just_pressed(SHOW_SCENT_TRAIL_ACTION):
+			scent_trail_remaining = SCENT_TRAIL_DURATION_SECONDS
 		_handle_grid_movement_input()
 
+	if hunt_status_remaining > 0.0:
+		hunt_status_remaining = maxf(0.0, hunt_status_remaining - delta)
+		if hunt_status_remaining <= 0.0:
+			_clear_hunt_status()
+
 	_smooth_avatar_positions(delta)
+	_update_scent_trail()
+	_sync_active_location_zone()
 	_sync_camera_to_local_avatar()
 	_update_world_actions()
 
@@ -309,6 +341,9 @@ func _activate_room(next_room: colyseus.Room, is_reconnect: bool) -> void:
 	move_cooldown_remaining = 0.0
 	local_facing = "right"
 	last_sent_facing = ""
+	sprint_requires_repress = false
+	sprint_end_reconcile_pending = false
+	sprint_release_sent = false
 
 	_store_reconnection_token(room.reconnection_token)
 	_bind_room_events()
@@ -377,6 +412,7 @@ func _on_search_prey_result(data: Dictionary) -> void:
 	var spawn_y := float(data.get("y", 0.0))
 
 	if ok and spawned:
+		_clear_hunt_status()
 		print("[hunt] Prey spawned in zone %s at (%.0f, %.0f)." % [
 			zone_id if not zone_id.is_empty() else "<unnamed>",
 			spawn_x,
@@ -385,10 +421,19 @@ func _on_search_prey_result(data: Dictionary) -> void:
 		return
 
 	if ok:
+		_clear_hunt_status()
 		print("[hunt] Search finished in zone %s, but no prey appeared." % (zone_id if not zone_id.is_empty() else "<unnamed>"))
 		return
 
-	print("[hunt] Search failed: %s" % str(data.get("error", "unknown error")))
+	var error_text := str(data.get("error", "unknown error"))
+	var retry_after_ms := int(data.get("retryAfterMs", 0))
+	if retry_after_ms > 0:
+		var retry_seconds := maxi(1, ceili(float(retry_after_ms) / 1000.0))
+		error_text = "%s (%d сек.)" % [error_text, retry_seconds]
+
+	error_text = str(data.get("error", "unknown error"))
+	_set_hunt_status(error_text)
+	print("[hunt] Search failed: %s" % error_text)
 
 func _on_prey_captured(data: Dictionary) -> void:
 	print("[hunt] Prey %s was captured at (%.0f, %.0f)." % [
@@ -466,6 +511,7 @@ func _register_player(player_id: String, player: Player) -> void:
 	_apply_player_appearance(player_id, avatar, player)
 	if avatar.has_method("set_facing"):
 		avatar.set_facing(_normalize_player_facing(player))
+	_set_avatar_sprinting(player_id, _effective_server_sprinting_for_local_player(player) if is_local_avatar else _normalize_player_sprinting(player))
 
 	var position := Vector2(player.x, player.y)
 	if is_local_avatar:
@@ -508,6 +554,13 @@ func _set_avatar_target(player_id: String, world_position: Vector2, snap_to_targ
 	if snap_to_target:
 		avatar.position = world_position
 
+func _set_avatar_sprinting(player_id: String, is_sprinting: bool) -> void:
+	var avatar = avatars.get(player_id)
+	if avatar == null or not avatar.has_method("set_sprinting"):
+		return
+
+	avatar.set_sprinting(is_sprinting)
+
 func _refresh_all_avatar_positions() -> void:
 	if room == null:
 		return
@@ -520,6 +573,7 @@ func _refresh_all_avatar_positions() -> void:
 	for player_id in players.keys():
 		var player = players.at(player_id)
 		if player != null:
+			_set_avatar_sprinting(player_id, _effective_server_sprinting_for_local_player(player) if _is_local_player(player_id, player) else _normalize_player_sprinting(player))
 			_set_avatar_target(player_id, Vector2(player.x, player.y))
 
 func _remove_avatar(player_id: String) -> void:
@@ -539,26 +593,29 @@ func _register_prey(prey_id: String, prey: Prey) -> void:
 	if prey == null:
 		return
 
+	prey_states[prey_id] = str(prey.state).strip_edges().to_lower()
 	var prey_avatar = prey_avatars.get(prey_id)
 	if prey_avatar == null:
 		prey_avatar = PreyAvatarScene.instantiate()
 		prey_avatar.name = "PreyAvatar_%s" % prey_id
-		var prey_preview = world_view.npc_layer.get_node_or_null("PreyPreview")
+		var prey_preview = world_view.get_prey_visual_preview(str(prey.visualId), str(prey.kind))
 		if prey_preview != null and prey_avatar.has_method("copy_visual_from"):
 			prey_avatar.copy_visual_from(prey_preview)
 		world_view.npc_layer.add_child(prey_avatar)
 		prey_avatars[prey_id] = prey_avatar
 
 	if prey_avatar.has_method("configure"):
-		prey_avatar.configure(str(prey.kind), str(prey.state))
+		prey_avatar.configure(str(prey.kind), str(prey.state), str(prey.behaviorType), bool(prey.watching))
 
 	prey_avatar.position = Vector2(prey.x, prey.y)
 
 func _remove_prey_avatar(prey_id: String) -> void:
 	var prey_avatar = prey_avatars.get(prey_id)
 	if prey_avatar == null:
+		prey_states.erase(prey_id)
 		return
 
+	prey_states.erase(prey_id)
 	prey_avatars.erase(prey_id)
 	prey_avatar.queue_free()
 
@@ -569,6 +626,8 @@ func _clear_prey() -> void:
 			prey_avatar.queue_free()
 
 	prey_avatars.clear()
+	prey_states.clear()
+	world_view.clear_scent_trail()
 
 func _clear_world() -> void:
 	for player_id in avatars.keys():
@@ -590,12 +649,21 @@ func _clear_world() -> void:
 	local_pending_steps.clear()
 	current_player_name = ""
 	active_prey_search_zone = null
+	active_location_zone = null
 	local_facing = "right"
 	last_sent_facing = ""
 	local_stamina = MAX_STAMINA
+	local_skills_json = ""
 	local_is_sprinting = false
+	sprint_requires_repress = false
+	sprint_end_reconcile_pending = false
+	sprint_release_sent = false
+	scent_trail_remaining = 0.0
+	_clear_hunt_status()
 	world_view.reset_camera()
+	world_view.clear_scent_trail()
 	_update_stamina_ui()
+	_update_hunting_skill_ui()
 	_update_action_ui()
 	_refresh_debug_info()
 
@@ -612,8 +680,16 @@ func _detach_room_runtime() -> void:
 	last_cardinal_direction = Vector2.ZERO
 	move_cooldown_remaining = 0.0
 	local_stamina = MAX_STAMINA
+	local_skills_json = ""
 	local_is_sprinting = false
+	sprint_requires_repress = false
+	sprint_end_reconcile_pending = false
+	sprint_release_sent = false
+	scent_trail_remaining = 0.0
+	_clear_hunt_status()
+	world_view.clear_scent_trail()
 	_update_stamina_ui()
+	_update_hunting_skill_ui()
 	_update_action_ui()
 
 func _set_connection_state(next_state: int, detail: String = "") -> void:
@@ -810,9 +886,25 @@ func _store_local_player_identity(player_id: String, player: Player, is_new_avat
 	local_facing = _normalize_player_facing(player)
 	last_sent_facing = local_facing
 	local_stamina = _normalize_player_stamina(player)
-	local_is_sprinting = _normalize_player_sprinting(player)
-	_update_stamina_ui()
+	local_skills_json = str(player.skillsJson).strip_edges()
 	var server_position := Vector2(player.x, player.y)
+	var server_is_sprinting := _effective_server_sprinting_for_local_player(player)
+	local_is_sprinting = server_is_sprinting
+	_set_avatar_sprinting(player_id, server_is_sprinting)
+	if local_stamina < MIN_STAMINA_TO_SPRINT:
+		sprint_requires_repress = true
+	if sprint_end_reconcile_pending and not server_is_sprinting:
+		sprint_end_reconcile_pending = false
+		local_authoritative_position = server_position
+		local_pending_steps.clear()
+		local_position = server_position
+		move_cooldown_remaining = maxf(move_cooldown_remaining, _grid_move_repeat_seconds(false))
+		_set_avatar_target(player_id, server_position, false, _cell_transition_duration(false))
+		_update_stamina_ui()
+		_update_hunting_skill_ui()
+		return
+	_update_stamina_ui()
+	_update_hunting_skill_ui()
 	current_player_name = _display_player_name(player)
 
 	if is_new_avatar or not has_local_authoritative_position:
@@ -820,7 +912,7 @@ func _store_local_player_identity(player_id: String, player: Player, is_new_avat
 		local_authoritative_position = server_position
 		local_pending_steps.clear()
 		local_position = server_position
-		_set_avatar_target(player_id, server_position, true, _transition_duration_for_player(player))
+		_set_avatar_target(player_id, server_position, true, _cell_transition_duration(server_is_sprinting))
 		world_view.set_camera_target(server_position, true)
 		return
 
@@ -846,6 +938,12 @@ func _is_expired_reconnect_error(error_text: String) -> bool:
 	)
 
 func _handle_grid_movement_input() -> void:
+	if not Input.is_action_pressed(MOVE_SPRINT_ACTION):
+		if sprint_requires_repress and not sprint_release_sent:
+			_notify_sprint_released()
+		sprint_requires_repress = false
+		sprint_release_sent = false
+
 	var held_direction := _read_current_grid_direction()
 	if held_direction == Vector2.ZERO:
 		held_move_direction = Vector2.ZERO
@@ -854,13 +952,27 @@ func _handle_grid_movement_input() -> void:
 
 	held_move_direction = held_direction
 	_apply_facing_from_direction(held_direction)
+
+	if sprint_end_reconcile_pending:
+		local_is_sprinting = false
+		return
+
 	var wants_sprint := _wants_sprint()
+	if not wants_sprint and local_is_sprinting:
+		local_is_sprinting = false
+		move_cooldown_remaining = maxf(move_cooldown_remaining, _grid_move_repeat_seconds(false))
 
 	if move_cooldown_remaining > 0.0:
 		return
 
 	_send_grid_move(held_direction, wants_sprint)
-	move_cooldown_remaining = _grid_move_repeat_seconds(wants_sprint)
+	var next_step_can_sprint := (
+		wants_sprint
+		and not sprint_requires_repress
+		and not sprint_end_reconcile_pending
+		and local_stamina >= MIN_STAMINA_TO_SPRINT
+	)
+	move_cooldown_remaining = _grid_move_repeat_seconds(next_step_can_sprint)
 
 func _read_current_grid_direction() -> Vector2:
 	var diagonal_direction := _read_explicit_diagonal_direction()
@@ -964,7 +1076,15 @@ func _predict_local_grid_move(direction: Vector2, is_sprinting := false) -> void
 
 	local_pending_steps.append(direction)
 	local_position = predicted_position
+	if is_sprinting:
+		local_stamina = maxf(0.0, local_stamina - SPRINT_STAMINA_COST)
+		if local_stamina < MIN_STAMINA_TO_SPRINT:
+			sprint_requires_repress = true
+			sprint_end_reconcile_pending = true
+			sprint_release_sent = false
+		_update_stamina_ui()
 	local_is_sprinting = is_sprinting
+	_set_avatar_sprinting(local_player_id, is_sprinting)
 	_set_avatar_target(local_player_id, predicted_position, false, _cell_transition_duration(is_sprinting))
 
 func _sync_camera_to_local_avatar() -> void:
@@ -976,6 +1096,77 @@ func _sync_camera_to_local_avatar() -> void:
 		return
 
 	world_view.set_camera_target(avatar.global_position)
+
+func _update_scent_trail() -> void:
+	if world_view == null or scent_trail_remaining <= 0.0 or local_player_id.is_empty():
+		if world_view != null:
+			world_view.clear_scent_trail()
+		return
+
+	var local_avatar := avatars.get(local_player_id) as Node2D
+	if local_avatar == null:
+		world_view.clear_scent_trail()
+		return
+
+	var nearest_prey_avatar: Node2D = null
+	var nearest_distance_squared := INF
+	for prey_id in prey_avatars.keys():
+		if str(prey_states.get(prey_id, "")).strip_edges().to_lower() != "alive":
+			continue
+
+		var prey_avatar := prey_avatars.get(prey_id) as Node2D
+		if prey_avatar == null:
+			continue
+
+		var distance_squared := local_avatar.global_position.distance_squared_to(prey_avatar.global_position)
+		if distance_squared < nearest_distance_squared:
+			nearest_distance_squared = distance_squared
+			nearest_prey_avatar = prey_avatar
+
+	if nearest_prey_avatar == null:
+		world_view.clear_scent_trail()
+		return
+
+	world_view.set_scent_trail(
+		world_view.to_local(local_avatar.global_position),
+		world_view.to_local(nearest_prey_avatar.global_position)
+	)
+
+func _sync_active_location_zone() -> void:
+	if local_player_id.is_empty():
+		_set_active_location_zone(null)
+		return
+
+	var avatar := avatars.get(local_player_id) as Node2D
+	if avatar == null:
+		_set_active_location_zone(null)
+		return
+
+	var next_zone: Node = null
+	var next_zone_area := INF
+	for child in world_view.location_zones_layer.get_children():
+		if not child.has_method("contains_world_position") or not child.has_method("get_world_zone_rect"):
+			continue
+		if child.contains_world_position(avatar.global_position):
+			var zone_rect: Rect2 = child.get_world_zone_rect()
+			var zone_area := zone_rect.size.x * zone_rect.size.y
+			if next_zone == null or zone_area < next_zone_area:
+				next_zone = child
+				next_zone_area = zone_area
+
+	_set_active_location_zone(next_zone)
+
+func _set_active_location_zone(next_zone: Node) -> void:
+	if active_location_zone == next_zone:
+		return
+
+	active_location_zone = next_zone
+	if active_location_zone == null:
+		world_view.clear_camera_zone(true)
+		return
+
+	if active_location_zone.has_method("get_world_zone_rect"):
+		world_view.set_camera_zone_rect(active_location_zone.get_world_zone_rect(), true)
 
 func _resnap_camera_to_local_avatar() -> void:
 	if local_player_id.is_empty():
@@ -1027,12 +1218,15 @@ func _run_auto_connect_retry() -> void:
 		_show_auth_gate("Войдите по почте и паролю.")
 
 func _reconcile_local_authoritative_position(player_id: String, player: Player, server_position: Vector2) -> void:
+	var authoritative_is_sprinting := _effective_server_sprinting_for_local_player(player)
+	var authoritative_transition_duration := _cell_transition_duration(authoritative_is_sprinting)
+
 	if not has_local_authoritative_position:
 		has_local_authoritative_position = true
 		local_authoritative_position = server_position
 		local_pending_steps.clear()
 		local_position = server_position
-		_set_avatar_target(player_id, server_position, true, _transition_duration_for_player(player))
+		_set_avatar_target(player_id, server_position, true, authoritative_transition_duration)
 		return
 
 	if _is_same_grid_position(server_position, local_authoritative_position):
@@ -1056,12 +1250,12 @@ func _reconcile_local_authoritative_position(player_id: String, player: Player, 
 			local_pending_steps.remove_at(0)
 
 		local_position = _build_predicted_local_position()
-		_set_avatar_target(player_id, local_position, false, _transition_duration_for_player(player))
+		_set_avatar_target(player_id, local_position, false, authoritative_transition_duration)
 		return
 
 	local_pending_steps.clear()
 	local_position = server_position
-	_set_avatar_target(player_id, server_position, false, _transition_duration_for_player(player))
+	_set_avatar_target(player_id, server_position, false, authoritative_transition_duration)
 
 func _build_predicted_local_position() -> Vector2:
 	var predicted_position := local_authoritative_position
@@ -1081,11 +1275,28 @@ func _normalize_player_stamina(player: Player) -> float:
 func _normalize_player_sprinting(player: Player) -> bool:
 	return player != null and bool(player.sprinting) and _normalize_player_stamina(player) > 0.0
 
+func _effective_server_sprinting_for_local_player(player: Player) -> bool:
+	if sprint_requires_repress or sprint_end_reconcile_pending:
+		return false
+
+	return _normalize_player_sprinting(player)
+
 func _transition_duration_for_player(player: Player) -> float:
 	return _cell_transition_duration(_normalize_player_sprinting(player))
 
 func _wants_sprint() -> bool:
-	return Input.is_action_pressed(MOVE_SPRINT_ACTION) and local_stamina >= MIN_STAMINA_TO_SPRINT
+	return (
+		Input.is_action_pressed(MOVE_SPRINT_ACTION)
+		and not sprint_requires_repress
+		and local_stamina >= MIN_STAMINA_TO_SPRINT
+	)
+
+func _notify_sprint_released() -> void:
+	if room == null or not room.has_joined():
+		return
+
+	room.send("sprint-release", {})
+	sprint_release_sent = true
 
 func _update_stamina_ui() -> void:
 	if stamina_hud == null or stamina_label == null or stamina_bar == null:
@@ -1104,6 +1315,94 @@ func _update_stamina_ui() -> void:
 	else:
 		stamina_bar.modulate = Color(0.78, 0.91, 0.67, 1.0)
 
+func _update_hunting_skill_ui() -> void:
+	if (
+		hunting_skill_title_label == null
+		or hunting_skill_level_label == null
+		or hunting_skill_progress_label == null
+		or hunting_skill_bar == null
+	):
+		return
+
+	var hunting_xp := _get_skill_xp_from_json(local_skills_json, HUNTING_SKILL_ID)
+	var progress := _build_skill_progress_state(hunting_xp, HUNTING_SKILL_LEVEL_REQUIREMENTS)
+	var level := int(progress.get("level", 0))
+	var level_xp := float(progress.get("level_xp", 0.0))
+	var required_xp := maxf(1.0, float(progress.get("required_xp", 1.0)))
+	var remaining_xp := int(progress.get("remaining_xp", 0))
+	var is_max_level := bool(progress.get("is_max_level", false))
+
+	hunting_skill_title_label.text = "Охотничьи навыки"
+	hunting_skill_level_label.text = "Уровень %d" % level
+	if is_max_level:
+		hunting_skill_progress_label.text = "Максимальный уровень"
+	else:
+		hunting_skill_progress_label.text = "До следующего уровня: %d" % remaining_xp
+
+	hunting_skill_bar.min_value = 0.0
+	hunting_skill_bar.max_value = required_xp
+	hunting_skill_bar.value = required_xp if is_max_level else clampf(level_xp, 0.0, required_xp)
+	hunting_skill_bar.show_percentage = false
+	hunting_skill_bar.modulate = Color(0.86, 0.73, 0.46, 1.0)
+
+func _get_skill_xp_from_json(skills_json: String, skill_id: String) -> float:
+	var normalized_json := skills_json.strip_edges()
+	if normalized_json.is_empty():
+		return 0.0
+
+	var parsed = JSON.parse_string(normalized_json)
+	if typeof(parsed) != TYPE_DICTIONARY:
+		return 0.0
+
+	var payload: Dictionary = parsed
+	var raw_skills = payload.get("skills", {})
+	if typeof(raw_skills) != TYPE_DICTIONARY:
+		return 0.0
+
+	var skills: Dictionary = raw_skills
+	var raw_entry = skills.get(skill_id, {})
+	if typeof(raw_entry) != TYPE_DICTIONARY:
+		return 0.0
+
+	var entry: Dictionary = raw_entry
+	return maxf(0.0, _coerce_float(entry.get("xp", 0.0)))
+
+func _build_skill_progress_state(total_xp: float, level_requirements: Array) -> Dictionary:
+	var normalized_xp := maxf(0.0, total_xp)
+	var accumulated_requirement := 0.0
+
+	for index in level_requirements.size():
+		var required_xp := maxf(1.0, _coerce_float(level_requirements[index]))
+		var threshold := accumulated_requirement + required_xp
+		if normalized_xp < threshold:
+			return {
+				"level": index,
+				"level_xp": normalized_xp - accumulated_requirement,
+				"required_xp": required_xp,
+				"remaining_xp": int(ceil(threshold - normalized_xp)),
+				"is_max_level": false,
+			}
+
+		accumulated_requirement = threshold
+
+	var max_requirement := 1.0
+	if level_requirements.size() > 0:
+		max_requirement = maxf(1.0, _coerce_float(level_requirements[level_requirements.size() - 1]))
+
+	return {
+		"level": level_requirements.size(),
+		"level_xp": max_requirement,
+		"required_xp": max_requirement,
+		"remaining_xp": 0,
+		"is_max_level": true,
+	}
+
+func _coerce_float(value) -> float:
+	if typeof(value) == TYPE_INT or typeof(value) == TYPE_FLOAT:
+		return float(value)
+
+	return 0.0
+
 func _ensure_move_input_actions() -> void:
 	_ensure_move_input_action(MOVE_UP_ACTION, [Key.KEY_W])
 	_ensure_move_input_action(MOVE_DOWN_ACTION, [Key.KEY_S])
@@ -1113,6 +1412,7 @@ func _ensure_move_input_actions() -> void:
 	_ensure_move_input_action(MOVE_UP_RIGHT_ACTION, [Key.KEY_E])
 	_ensure_move_input_action(MOVE_DOWN_LEFT_ACTION, [Key.KEY_Z])
 	_ensure_move_input_action(MOVE_DOWN_RIGHT_ACTION, [Key.KEY_X])
+	_ensure_move_input_action(SHOW_SCENT_TRAIL_ACTION, [Key.KEY_U])
 	_ensure_modifier_input_action(MOVE_SPRINT_ACTION, [Key.KEY_SHIFT])
 
 func _ensure_move_input_action(action_name: StringName, physical_keys: Array) -> void:
@@ -1167,10 +1467,20 @@ func _configure_action_ui() -> void:
 	action_overlay.visible = false
 	action_bottom_center.visible = false
 	stamina_hud.visible = false
+	hunt_status_label.visible = false
+	hunt_status_label.text = ""
 	stamina_label.text = "Stamina 100%"
 	stamina_bar.show_percentage = false
 	stamina_bar.value = MAX_STAMINA
+	hunting_skill_title_label.text = "Охотничьи навыки"
+	hunting_skill_level_label.text = "Уровень 0"
+	hunting_skill_progress_label.text = "До следующего уровня: 5"
+	hunting_skill_bar.min_value = 0.0
+	hunting_skill_bar.max_value = 5.0
+	hunting_skill_bar.value = 0.0
+	hunting_skill_bar.show_percentage = false
 	_update_stamina_ui()
+	_update_hunting_skill_ui()
 	search_prey_button.text = "Искать дичь"
 	search_prey_button.pressed.connect(_on_search_prey_pressed)
 
@@ -1188,11 +1498,28 @@ func _update_action_ui() -> void:
 
 	if not can_show_search:
 		search_prey_button.tooltip_text = ""
+		_clear_hunt_status()
 		return
 
 	search_prey_button.text = "Искать дичь"
 	var zone_id := _get_active_prey_search_zone_id()
 	search_prey_button.tooltip_text = "" if zone_id.is_empty() else "Зона: %s" % zone_id
+
+func _set_hunt_status(message: String, duration := 4.0) -> void:
+	if hunt_status_label == null:
+		return
+
+	hunt_status_label.text = message
+	hunt_status_label.visible = not message.is_empty()
+	hunt_status_remaining = maxf(0.0, duration)
+
+func _clear_hunt_status() -> void:
+	hunt_status_remaining = 0.0
+	if hunt_status_label == null:
+		return
+
+	hunt_status_label.text = ""
+	hunt_status_label.visible = false
 
 func _find_active_prey_search_zone():
 	if local_player_id.is_empty():

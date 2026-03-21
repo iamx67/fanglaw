@@ -3,8 +3,7 @@ import express, {} from "express";
 import { Server, matchMaker } from "colyseus";
 import { WebSocketTransport } from "@colyseus/ws-transport";
 import { CatRoom } from "./rooms/CatRoom.js";
-import { AuthStoreError, authStore } from "./persistence/AuthStore.js";
-import { PlayerIdentityStoreError, parseStoredAppearanceJson, playerIdentityStore, } from "./persistence/PlayerIdentityStore.js";
+import { AuthStoreError, PlayerIdentityStoreError, accountsService, charactersService, } from "./services/index.js";
 const PORT = Number(process.env.PORT ?? 2567);
 const PUBLIC_URL = process.env.PUBLIC_URL?.trim() || `http://localhost:${PORT}`;
 const WORLD_ROOM_NAME = process.env.WORLD_ROOM_NAME?.trim() || "cats";
@@ -37,15 +36,12 @@ const gameServer = new Server({
         });
         app.post("/api/register", async (req, res) => {
             try {
-                const registration = await authStore.register({
+                const registration = await accountsService.registerAccount({
                     email: readString(req.body?.email),
                     password: readString(req.body?.password),
-                    characterName: readString(req.body?.characterName),
                 });
-                const profile = playerIdentityStore.getOrCreateProfile(registration.character.characterId, registration.character.name, "account");
-                await authStore.flush();
-                await playerIdentityStore.flush();
-                res.status(201).json(buildAuthResponse(registration.account, registration.character, profile, registration.session.token));
+                await accountsService.flush();
+                res.status(201).json(buildAuthResponse(registration.account, registration.character, null, registration.sessionToken));
             }
             catch (error) {
                 respondWithApiError(res, error);
@@ -53,14 +49,39 @@ const gameServer = new Server({
         });
         app.post("/api/login", async (req, res) => {
             try {
-                const login = await authStore.login({
+                const login = await accountsService.loginAccount({
                     email: readString(req.body?.email),
                     password: readString(req.body?.password),
                 });
-                const profile = playerIdentityStore.getOrCreateProfile(login.character.characterId, login.character.name, "account");
-                await authStore.flush();
-                await playerIdentityStore.flush();
-                res.json(buildAuthResponse(login.account, login.character, profile, login.session.token));
+                const profile = login.character
+                    ? charactersService.ensureAccountCharacter(login.character.characterId, login.character.name)
+                    : null;
+                await accountsService.flush();
+                if (profile) {
+                    await charactersService.flush();
+                }
+                res.json(buildAuthResponse(login.account, login.character, profile, login.sessionToken));
+            }
+            catch (error) {
+                respondWithApiError(res, error);
+            }
+        });
+        app.post("/api/characters", async (req, res) => {
+            try {
+                const sessionToken = extractBearerToken(req);
+                const created = await accountsService.createCharacterForSession({
+                    sessionToken,
+                    characterName: readString(req.body?.characterName),
+                });
+                const profile = created.character
+                    ? charactersService.saveSiteProfile(created.character.characterId, created.character.name, {
+                        tribe: readString(req.body?.tribe),
+                        gender: readString(req.body?.gender),
+                    })
+                    : null;
+                await accountsService.flush();
+                await charactersService.flush();
+                res.status(201).json(buildAuthResponse(created.account, created.character, profile, created.sessionToken));
             }
             catch (error) {
                 respondWithApiError(res, error);
@@ -69,15 +90,14 @@ const gameServer = new Server({
         app.get("/api/me", async (req, res) => {
             try {
                 const sessionToken = extractBearerToken(req);
-                const auth = await authStore.getAuthBySessionToken(sessionToken);
-                const profile = playerIdentityStore.getOrCreateProfile(auth.characterId, auth.characterName, "account");
+                const auth = await accountsService.requireSessionContext(sessionToken);
+                const profile = auth.characterId && auth.characterName
+                    ? charactersService.ensureAccountCharacter(auth.characterId, auth.characterName)
+                    : null;
                 res.json(buildAuthResponse({
                     accountId: auth.accountId,
                     email: auth.email,
-                }, {
-                    characterId: auth.characterId,
-                    name: auth.characterName,
-                }, profile, auth.sessionToken));
+                }, buildCharacterRecord(auth), profile, auth.sessionToken));
             }
             catch (error) {
                 respondWithApiError(res, error);
@@ -86,17 +106,14 @@ const gameServer = new Server({
         app.post("/api/me/appearance", async (req, res) => {
             try {
                 const sessionToken = extractBearerToken(req);
-                const auth = await authStore.getAuthBySessionToken(sessionToken);
-                playerIdentityStore.getOrCreateProfile(auth.characterId, auth.characterName, "account");
-                const profile = playerIdentityStore.saveAppearanceOnce(auth.characterId, req.body?.appearance);
-                await playerIdentityStore.flush();
+                const auth = await accountsService.requireSessionContext(sessionToken);
+                const currentCharacter = requireCurrentCharacter(auth);
+                const profile = charactersService.saveAppearanceOnce(currentCharacter.characterId, currentCharacter.name, req.body?.appearance);
+                await charactersService.flush();
                 res.json(buildAuthResponse({
                     accountId: auth.accountId,
                     email: auth.email,
-                }, {
-                    characterId: auth.characterId,
-                    name: auth.characterName,
-                }, profile, auth.sessionToken));
+                }, currentCharacter, profile, auth.sessionToken));
             }
             catch (error) {
                 respondWithApiError(res, error);
@@ -105,8 +122,8 @@ const gameServer = new Server({
     },
 });
 gameServer.define(WORLD_ROOM_NAME, CatRoom);
-await authStore.load();
-await playerIdentityStore.load();
+await accountsService.load();
+await charactersService.load();
 await gameServer.listen(PORT);
 const worldRoom = await matchMaker.createRoom(WORLD_ROOM_NAME, WORLD_ROOM_OPTIONS);
 console.log(`Server running on ${PUBLIC_URL}`);
@@ -122,13 +139,35 @@ function buildAuthResponse(account, character, profile, sessionToken) {
             accountId: account.accountId,
             email: account.email,
         },
-        character: {
+        character: character && profile ? {
             characterId: character.characterId,
             name: character.name,
             appearanceLocked: profile.appearanceLocked,
-            appearance: parseStoredAppearanceJson(profile.appearanceJson),
-        },
+            appearance: profile.appearance,
+            skills: profile.skills,
+        } : null,
+        siteProfile: profile ? {
+            username: profile.siteProfile.username,
+            tribe: profile.siteProfile.tribe,
+            gender: profile.siteProfile.gender,
+        } : null,
     };
+}
+function buildCharacterRecord(auth) {
+    if (!auth.characterId || !auth.characterName) {
+        return null;
+    }
+    return {
+        characterId: auth.characterId,
+        name: auth.characterName,
+    };
+}
+function requireCurrentCharacter(auth) {
+    const currentCharacter = buildCharacterRecord(auth);
+    if (!currentCharacter) {
+        throw new AuthStoreError("Character must be created before this action", "CHARACTER_REQUIRED");
+    }
+    return currentCharacter;
 }
 function extractBearerToken(req) {
     const authHeader = req.header("Authorization") ?? "";
@@ -182,9 +221,13 @@ function getAuthErrorStatus(code) {
         case "INVALID_PASSWORD":
         case "INVALID_NAME":
             return 400;
+        case "CHARACTER_REQUIRED":
+            return 409;
         case "AUTH_FAILED":
         case "SESSION_NOT_FOUND":
             return 401;
+        case "CHARACTER_EXISTS":
+            return 409;
         default:
             return 400;
     }

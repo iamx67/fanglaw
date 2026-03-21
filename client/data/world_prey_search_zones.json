@@ -6,12 +6,44 @@
 			"locationId": "",
 			"name": "PreySearchZone",
 			"preyKind": "mouse",
+			"preyProfileId": "mouse",
+			"preyVisualId": "mouse",
 			"requiredSkill": "hunting",
 			"searchZoneId": "search_zone_01",
 			"spawnTag": "bushes",
 			"width": 300.0,
 			"x": -183.0,
 			"y": -898.0
+		},
+		{
+			"difficulty": 0.0,
+			"height": 600.0,
+			"locationId": "2",
+			"name": "PreySearchZone2",
+			"preyKind": "bird",
+			"preyProfileId": "bird",
+			"preyVisualId": "kulik",
+			"requiredSkill": "hunting",
+			"searchZoneId": "bird_zone_01",
+			"spawnTag": "trees",
+			"width": 900.0,
+			"x": -6637.0,
+			"y": 625.0
+		},
+		{
+			"difficulty": 0.0,
+			"height": 700.0,
+			"locationId": "2",
+			"name": "PreySearchZone3",
+			"preyKind": "rabbit",
+			"preyProfileId": "rabbit",
+			"preyVisualId": "zayac",
+			"requiredSkill": "hunting",
+			"searchZoneId": "rabbit_zone_01",
+			"spawnTag": "trees",
+			"width": 400.0,
+			"x": -2094.0,
+			"y": 439.0
 		}
 	]
 }

@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Fanglaw — Создание персонажа</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body data-page="create-character">
+  <div class="site-shell">
+    <header class="site-header">
+      <a class="logo" href="/">Fanglaw</a>
+      <nav class="site-nav" aria-label="Основная навигация">
+        <ul>
+          <li><a class="btn-play" href="/catlaw.html">Играть</a></li>
+        </ul>
+      </nav>
+    </header>
+
+    <main class="appearance-main">
+      <section class="panel page-panel">
+        <div class="panel-head">
+          <div>
+            <p class="eyebrow subtle">Шаг 2 из 3</p>
+            <h1 class="page-title">Создание персонажа</h1>
+          </div>
+          <span id="auth-chip" class="chip muted">Нужен аккаунт</span>
+        </div>
+        <p class="lead compact">
+          Аккаунт уже создан. Теперь задай имя кота, племя и пол. После этого сайт переведёт тебя на страницу выбора окраса.
+        </p>
+      </section>
+
+      <section class="panel editor-panel">
+        <div class="editor-toolbar">
+          <div class="account-card appearance-account-card">
+            <strong>Аккаунт</strong>
+            <span id="create-character-email">cat@fanglaw.ru</span>
+          </div>
+
+          <button id="create-character-logout-button" class="button secondary" type="button">Выйти</button>
+        </div>
+
+        <form id="create-character-form" class="stack">
+          <label class="field">
+            <span>Игровое имя (только русские буквы)</span>
+            <input id="gameName" name="gameName" type="text" maxlength="16" placeholder="Например: Остроклык" required>
+          </label>
+
+          <label class="field">
+            <span>Племя</span>
+            <select id="tribe" name="tribe">
+              <option value="Грозовое племя">Грозовое племя</option>
+              <option value="Племя Теней">Племя Теней</option>
+              <option value="Речное племя">Речное племя</option>
+              <option value="Племя Ветра">Племя Ветра</option>
+              <option value="Одиночки">Одиночки</option>
+            </select>
+          </label>
+
+          <label class="field">
+            <span>Пол</span>
+            <select id="gender" name="gender">
+              <option value="кот">Кот</option>
+              <option value="кошка">Кошка</option>
+            </select>
+          </label>
+
+          <button class="button primary auth-submit" type="submit">Создать персонажа</button>
+        </form>
+
+        <p id="create-character-status" class="status" aria-live="polite"></p>
+      </section>
+    </main>
+  </div>
+
+  <script src="./app.js"></script>
+</body>
+</html>

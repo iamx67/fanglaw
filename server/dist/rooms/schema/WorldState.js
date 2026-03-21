@@ -15,6 +15,7 @@ export class Player extends Schema {
         this.y = 0;
         this.facing = "right";
         this.appearanceJson = "";
+        this.skillsJson = "";
         this.stamina = 100;
         this.sprinting = false;
         this.connected = true;
@@ -42,6 +43,9 @@ __decorate([
     type("string")
 ], Player.prototype, "appearanceJson", void 0);
 __decorate([
+    type("string")
+], Player.prototype, "skillsJson", void 0);
+__decorate([
     type("number")
 ], Player.prototype, "stamina", void 0);
 __decorate([
@@ -55,7 +59,10 @@ export class Prey extends Schema {
         super(...arguments);
         this.preyId = "";
         this.kind = "mouse";
+        this.visualId = "";
+        this.behaviorType = "runner";
         this.state = "alive";
+        this.watching = false;
         this.searchZoneId = "";
         this.x = 0;
         this.y = 0;
@@ -69,7 +76,16 @@ __decorate([
 ], Prey.prototype, "kind", void 0);
 __decorate([
     type("string")
+], Prey.prototype, "visualId", void 0);
+__decorate([
+    type("string")
+], Prey.prototype, "behaviorType", void 0);
+__decorate([
+    type("string")
 ], Prey.prototype, "state", void 0);
+__decorate([
+    type("boolean")
+], Prey.prototype, "watching", void 0);
 __decorate([
     type("string")
 ], Prey.prototype, "searchZoneId", void 0);

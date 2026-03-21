@@ -15,6 +15,14 @@ const API_BASE = (() => {
   return "http://localhost:2567";
 })();
 
+const AUTH_PAGE_PATH = "/";
+const CREATE_CHARACTER_PAGE_PATH = "/create-character.html";
+const APPEARANCE_PAGE_PATH = "/appearance.html";
+const pageMode = document.body?.dataset.page || "auth";
+const isAuthPage = pageMode === "auth";
+const isCreateCharacterPage = pageMode === "create-character";
+const isAppearancePage = pageMode === "appearance";
+
 const form = document.getElementById("registration-form");
 const loginForm = document.getElementById("login-form");
 const statusNode = document.getElementById("form-status");
@@ -24,18 +32,26 @@ const authLoggedOut = document.getElementById("auth-logged-out");
 const authLoggedIn = document.getElementById("auth-logged-in");
 const editorPanel = document.getElementById("editor-panel");
 const editorLocked = document.getElementById("editor-locked");
+const editorLockedMessageNode = document.getElementById("editor-locked-message");
+const appearanceLockNoticeNode = document.getElementById("appearance-lock-notice");
 const saveAppearanceButton = document.getElementById("save-appearance-button");
 const appearanceSaveStatusNode = document.getElementById("appearance-save-status");
 const accountCharacterNameNode = document.getElementById("account-character-name");
 const accountEmailNode = document.getElementById("account-email");
+const accountMetaNode = document.getElementById("account-meta");
 const showRegisterButton = document.getElementById("show-register-button");
 const showLoginButton = document.getElementById("show-login-button");
 const logoutButton = document.getElementById("logout-button");
+const createCharacterForm = document.getElementById("create-character-form");
+const createCharacterStatusNode = document.getElementById("create-character-status");
+const createCharacterEmailNode = document.getElementById("create-character-email");
+const createCharacterLogoutButton = document.getElementById("create-character-logout-button");
 
 const emailInput = document.getElementById("email");
 const passwordInput = document.getElementById("password");
-const passwordConfirmInput = document.getElementById("password-confirm");
-const characterNameInput = document.getElementById("character-name");
+const characterNameInput = document.getElementById("gameName");
+const tribeInput = document.getElementById("tribe");
+const genderInput = document.getElementById("gender");
 const loginEmailInput = document.getElementById("login-email");
 const loginPasswordInput = document.getElementById("login-password");
 
@@ -84,6 +100,7 @@ const naturalPaletteSurface = {
 const naturalPalettePointCache = new Map();
 const naturalColorControls = new WeakMap();
 let naturalPickerGlobalsBound = false;
+const CYRILLIC_CHARACTER_NAME_PATTERN = /^[А-Яа-яЁё -]+$/;
 
 const BODY_PATTERN_OPTIONS = [
   { id: "none", label: "Без паттерна" },
@@ -205,6 +222,7 @@ const authState = {
   sessionToken: localStorage.getItem(SESSION_TOKEN_STORAGE_KEY) || "",
   account: null,
   character: null,
+  siteProfile: null,
 };
 
 const appearanceState = {
@@ -226,8 +244,21 @@ const loadedImages = {};
 let previewReady = false;
 
 function setStatus(text, isError = false) {
+  if (!statusNode) {
+    return;
+  }
+
   statusNode.textContent = text;
-  statusNode.style.color = isError ? "#8f2118" : "#8d4122";
+  statusNode.style.color = isError ? "#ff8e8e" : "#dbeedb";
+}
+
+function setCreateCharacterStatus(text, isError = false) {
+  if (!createCharacterStatusNode) {
+    return;
+  }
+
+  createCharacterStatusNode.textContent = text;
+  createCharacterStatusNode.style.color = isError ? "#ff8e8e" : "#dbeedb";
 }
 
 function setAppearanceStatus(text, isError = false) {
@@ -236,10 +267,38 @@ function setAppearanceStatus(text, isError = false) {
   }
 
   appearanceSaveStatusNode.textContent = text;
-  appearanceSaveStatusNode.style.color = isError ? "#8f2118" : "#8d4122";
+  appearanceSaveStatusNode.style.color = isError ? "#ff8e8e" : "#dbeedb";
+}
+
+function setEditorLockedMessage(text) {
+  if (!editorLockedMessageNode) {
+    return;
+  }
+
+  editorLockedMessageNode.textContent = text;
+}
+
+function navigateTo(path) {
+  if (window.location.pathname === path) {
+    return;
+  }
+
+  window.location.href = path;
+}
+
+function getDraftCharacterName() {
+  return characterNameInput?.value.trim() || "";
+}
+
+function getNextAuthorizedPage(payload) {
+  return payload?.character ? APPEARANCE_PAGE_PATH : CREATE_CHARACTER_PAGE_PATH;
 }
 
 function setAuthMode(mode) {
+  if (!form || !loginForm || !showRegisterButton || !showLoginButton) {
+    return;
+  }
+
   const registerActive = mode === "register";
   form.classList.toggle("is-hidden", !registerActive);
   loginForm.classList.toggle("is-hidden", registerActive);
@@ -247,23 +306,75 @@ function setAuthMode(mode) {
   showLoginButton.classList.toggle("is-active", !registerActive);
 }
 
+function renderAccountMeta(siteProfile) {
+  const metaParts = [];
+  if (siteProfile?.tribe) {
+    metaParts.push(siteProfile.tribe);
+  }
+  if (siteProfile?.gender) {
+    metaParts.push(siteProfile.gender);
+  }
+  const metaText = metaParts.join(" • ");
+
+  if (accountMetaNode) {
+    accountMetaNode.textContent = metaText;
+    accountMetaNode.classList.toggle("is-hidden", !metaText);
+  }
+}
+
 function setAuthenticated(payload) {
   authState.sessionToken = payload.sessionToken;
   authState.account = payload.account;
   authState.character = payload.character;
+  authState.siteProfile = payload.siteProfile || null;
 
   localStorage.setItem(SESSION_TOKEN_STORAGE_KEY, payload.sessionToken);
   localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
 
-  authLoggedOut.classList.add("is-hidden");
-  authLoggedIn.classList.remove("is-hidden");
-  editorLocked.classList.add("is-hidden");
-  editorPanel.classList.remove("is-hidden");
+  if (payload.character?.appearance) {
+    applyAppearancePayloadToState(payload.character.appearance);
+  }
+
+  if (isAuthPage) {
+    navigateTo(getNextAuthorizedPage(payload));
+    return;
+  }
+
+  if (isCreateCharacterPage) {
+    if (payload.character) {
+      navigateTo(APPEARANCE_PAGE_PATH);
+      return;
+    }
+
+    authChip.textContent = "Аккаунт";
+    if (createCharacterEmailNode) {
+      createCharacterEmailNode.textContent = payload.account?.email || "";
+    }
+    renderSavedState();
+    return;
+  }
+
+  if (!payload.character) {
+    navigateTo(CREATE_CHARACTER_PAGE_PATH);
+    return;
+  }
+
+  authLoggedOut?.classList.add("is-hidden");
+  authLoggedIn?.classList.remove("is-hidden");
+  editorLocked?.classList.add("is-hidden");
+  editorPanel?.classList.remove("is-hidden");
 
   authChip.textContent = "Авторизован";
-  accountCharacterNameNode.textContent = payload.character?.name || "Player";
-  accountEmailNode.textContent = payload.account?.email || "";
-  previewNameNode.textContent = payload.character?.name || characterNameInput.value.trim() || "Player";
+  if (accountCharacterNameNode) {
+    accountCharacterNameNode.textContent = payload.character?.name || "Персонаж не создан";
+  }
+  if (accountEmailNode) {
+    accountEmailNode.textContent = payload.account?.email || "";
+  }
+  renderAccountMeta(authState.siteProfile);
+  if (previewNameNode) {
+    previewNameNode.textContent = payload.character?.name || getDraftCharacterName() || "Player";
+  }
   if (payload.character?.appearance) {
     applyAppearancePayloadToState(payload.character.appearance);
   }
@@ -278,45 +389,81 @@ function setAuthenticated(payload) {
   renderEditor();
 }
 
-function clearAuthState() {
+function clearAuthState(options = {}) {
+  const shouldRedirect = options.redirect ?? (isAppearancePage || isCreateCharacterPage);
+
   authState.sessionToken = "";
   authState.account = null;
   authState.character = null;
+  authState.siteProfile = null;
 
   localStorage.removeItem(SESSION_TOKEN_STORAGE_KEY);
   localStorage.removeItem(STORAGE_KEY);
 
-  authLoggedOut.classList.remove("is-hidden");
-  authLoggedIn.classList.add("is-hidden");
-  editorLocked.classList.remove("is-hidden");
-  editorPanel.classList.add("is-hidden");
+  authLoggedOut?.classList.remove("is-hidden");
+  authLoggedIn?.classList.add("is-hidden");
+  editorLocked?.classList.remove("is-hidden");
+  editorPanel?.classList.add("is-hidden");
 
   authChip.textContent = "Гость";
-  accountCharacterNameNode.textContent = "Player";
-  accountEmailNode.textContent = "";
+  if (accountCharacterNameNode) {
+    accountCharacterNameNode.textContent = "Player";
+  }
+  if (accountEmailNode) {
+    accountEmailNode.textContent = "";
+  }
+  if (createCharacterEmailNode) {
+    createCharacterEmailNode.textContent = "";
+  }
+  renderAccountMeta(null);
   setAppearanceLockedState(false);
   setAppearanceStatus("Окрас можно сохранить только один раз на аккаунт.");
   renderSavedState();
+  setCreateCharacterStatus("");
   renderPreview();
+
+  if (shouldRedirect) {
+    navigateTo(AUTH_PAGE_PATH);
+  }
 }
 
 function setAppearanceLockedState(isLocked) {
+  if (!editorPanel) {
+    return;
+  }
+
+  appearanceLockNoticeNode?.classList.toggle("is-hidden", !Boolean(isLocked));
+
   const editorInputs = editorPanel.querySelectorAll("input, select, button");
   editorInputs.forEach((element) => {
-    if (element.id === "save-appearance-button") {
+    if (element.id === "save-appearance-button" || element.id === "logout-button") {
       return;
     }
 
     element.disabled = Boolean(isLocked);
+    if (isLocked) {
+      element.title = "Окрас уже сохранён и зафиксирован.";
+    } else {
+      element.removeAttribute("title");
+    }
   });
 
   if (saveAppearanceButton) {
     saveAppearanceButton.disabled = !authState.sessionToken || Boolean(isLocked);
+    if (isLocked) {
+      saveAppearanceButton.title = "Окрас уже сохранён и зафиксирован.";
+    } else {
+      saveAppearanceButton.removeAttribute("title");
+    }
     saveAppearanceButton.textContent = isLocked ? "Окрас сохранён" : "Сохранить окрас";
   }
 }
 
 function renderSavedState() {
+  if (!savedDataNode) {
+    return;
+  }
+
   const raw = localStorage.getItem(STORAGE_KEY);
   if (!raw) {
     savedDataNode.textContent = "Пока ничего не сохранено.";
@@ -752,6 +899,10 @@ function enhanceNaturalColorInput(input) {
 }
 
 function refreshNaturalColorInputs(root = document) {
+  if (!root?.querySelectorAll) {
+    return;
+  }
+
   root.querySelectorAll("input[type='color']").forEach((input) => {
     enhanceNaturalColorInput(input);
   });
@@ -760,10 +911,9 @@ function refreshNaturalColorInputs(root = document) {
 async function saveRegistration() {
   const email = emailInput.value.trim();
   const password = passwordInput.value;
-  const passwordConfirm = passwordConfirmInput.value;
-  const characterName = characterNameInput.value.trim();
+  const passwordConfirm = passwordInput.value;
 
-  if (!email || !password || !passwordConfirm || !characterName) {
+  if (!email || !password || !passwordConfirm) {
     setStatus("Заполните обязательные поля.", true);
     return;
   }
@@ -788,7 +938,6 @@ async function saveRegistration() {
       body: JSON.stringify({
         email,
         password,
-        characterName,
       }),
     });
 
@@ -798,12 +947,61 @@ async function saveRegistration() {
     }
 
     setAuthenticated(payload);
-    passwordInput.value = "";
-    passwordConfirmInput.value = "";
-    setStatus("Аккаунт зарегистрирован. Редактор внешности открыт.");
+    setStatus("Аккаунт зарегистрирован. Теперь нужно создать персонажа.");
+    return;
   } catch (error) {
     const message = error instanceof Error ? error.message : "Не удалось зарегистрироваться.";
     setStatus(message, true);
+    return;
+  }
+}
+
+async function saveCharacterCreation() {
+  if (!authState.sessionToken) {
+    setCreateCharacterStatus("Сначала войди в аккаунт.", true);
+    navigateTo(AUTH_PAGE_PATH);
+    return;
+  }
+
+  const characterName = characterNameInput?.value.trim() || "";
+  const tribe = tribeInput?.value.trim() || "";
+  const gender = genderInput?.value.trim() || "";
+
+  if (!CYRILLIC_CHARACTER_NAME_PATTERN.test(characterName)) {
+    setCreateCharacterStatus("Игровое имя должно содержать только русские буквы, пробелы или дефис.", true);
+    return;
+  }
+
+  if (!characterName) {
+    setCreateCharacterStatus("Заполни игровое имя.", true);
+    return;
+  }
+
+  try {
+    const response = await fetch(`${API_BASE}/api/characters`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${authState.sessionToken}`,
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: JSON.stringify({
+        characterName,
+        tribe,
+        gender,
+      }),
+    });
+
+    const payload = await response.json();
+    if (!response.ok || !payload.ok) {
+      throw new Error(payload.error || "Не удалось создать персонажа.");
+    }
+
+    setAuthenticated(payload);
+    setCreateCharacterStatus("Персонаж создан. Переходим к выбору окраса.");
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Не удалось создать персонажа.";
+    setCreateCharacterStatus(message, true);
   }
 }
 
@@ -845,8 +1043,8 @@ async function login() {
 
 async function restoreSession() {
   if (!authState.sessionToken) {
-    clearAuthState();
-    return;
+    clearAuthState({ redirect: isAppearancePage || isCreateCharacterPage });
+    return false;
   }
 
   try {
@@ -863,14 +1061,22 @@ async function restoreSession() {
     }
 
     setAuthenticated(payload);
+    return true;
   } catch (_error) {
-    clearAuthState();
+    clearAuthState({ redirect: isAppearancePage || isCreateCharacterPage });
+    return false;
   }
 }
 
 async function saveAppearance() {
   if (!authState.sessionToken) {
     setAppearanceStatus("Сначала нужно войти на сайт.", true);
+    return;
+  }
+
+  if (!authState.character) {
+    setAppearanceStatus("Сначала нужно создать персонажа.", true);
+    navigateTo(CREATE_CHARACTER_PAGE_PATH);
     return;
   }
 
@@ -1230,6 +1436,10 @@ function applyAppearancePayloadToState(payload) {
 }
 
 function renderAppearancePayload() {
+  if (!appearancePayloadNode) {
+    return;
+  }
+
   const payload = buildAppearancePayload();
   appearancePayloadNode.textContent = JSON.stringify(payload, null, 2);
 }
@@ -1313,7 +1523,7 @@ function maneContourKey() {
 }
 
 function renderPreview() {
-  if (!previewReady) {
+  if (!previewReady || !previewCanvas) {
     return;
   }
 
@@ -1358,7 +1568,9 @@ function renderPreview() {
   drawTintedLayer(context, loadedImages[earsKey()], appearanceState.ears_color, width, height);
   drawPlainLayer(context, loadedImages[earsContourKey()], width, height);
 
-  previewNameNode.textContent = authState.character?.name || characterNameInput.value.trim() || "Player";
+  if (previewNameNode) {
+    previewNameNode.textContent = authState.character?.name || getDraftCharacterName() || "Player";
+  }
 }
 
 function refreshAppearanceOutput() {
@@ -1368,9 +1580,14 @@ function refreshAppearanceOutput() {
 }
 
 function renderEditor() {
+  if (!editorPanel) {
+    return;
+  }
+
   syncControlsFromState();
   renderPatternSlotControls();
   refreshNaturalColorInputs(editorPanel);
+  setAppearanceLockedState(authState.character?.appearanceLocked === true);
   refreshAppearanceOutput();
 }
 
@@ -1389,7 +1606,7 @@ function bindStaticEditorEvents() {
     tailColorInput,
     maneColorInput,
     characterNameInput,
-  ];
+  ].filter(Boolean);
 
   for (const input of liveInputs) {
     input.addEventListener("input", () => {
@@ -1407,7 +1624,7 @@ function bindStaticEditorEvents() {
     tailSelect,
     maneSelect,
     cheeksSelect,
-  ];
+  ].filter(Boolean);
 
   for (const input of structuralInputs) {
     input.addEventListener("input", () => {
@@ -1428,37 +1645,62 @@ saveAppearanceButton?.addEventListener("click", () => {
 refreshNaturalColorInputs(editorPanel);
 }
 
-showRegisterButton.addEventListener("click", () => setAuthMode("register"));
-showLoginButton.addEventListener("click", () => setAuthMode("login"));
-logoutButton.addEventListener("click", () => {
+showRegisterButton?.addEventListener("click", () => setAuthMode("register"));
+showLoginButton?.addEventListener("click", () => setAuthMode("login"));
+createCharacterLogoutButton?.addEventListener("click", () => {
+  clearAuthState();
+  setCreateCharacterStatus("Ты вышел из аккаунта.");
+});
+logoutButton?.addEventListener("click", () => {
   clearAuthState();
   setStatus("Вы вышли из аккаунта.");
 });
 
-form.addEventListener("submit", (event) => {
+form?.addEventListener("submit", (event) => {
   event.preventDefault();
   void saveRegistration();
 });
 
-loginForm.addEventListener("submit", (event) => {
+loginForm?.addEventListener("submit", (event) => {
   event.preventDefault();
   void login();
 });
+createCharacterForm?.addEventListener("submit", (event) => {
+  event.preventDefault();
+  void saveCharacterCreation();
+});
 
-renderSavedState();
-loadDraftAppearance();
-syncControlsFromState();
-bindStaticEditorEvents();
-renderAppearancePayload();
-setAppearanceLockedState(false);
-setAppearanceStatus("Окрас можно сохранить только один раз на аккаунт.");
-setAuthMode("register");
+if (isAuthPage) {
+  renderSavedState();
+  setAuthMode("register");
+  void restoreSession();
+}
+if (isCreateCharacterPage) {
+  renderSavedState();
+  void restoreSession();
+}
 
-bootPreviewAssets()
-  .then(() => restoreSession())
-  .then(() => {
-    renderEditor();
-  })
-  .catch((error) => {
-    appearancePayloadNode.textContent = error instanceof Error ? error.message : "Не удалось запустить предпросмотр.";
-  });
+if (isAppearancePage) {
+  loadDraftAppearance();
+  syncControlsFromState();
+  bindStaticEditorEvents();
+  renderAppearancePayload();
+  setAppearanceLockedState(false);
+  setAppearanceStatus("Окрас можно сохранить только один раз на аккаунт.");
+  void restoreSession();
+
+  bootPreviewAssets()
+    .then(() => {
+      if (authState.sessionToken) {
+        renderEditor();
+      }
+    })
+    .catch((error) => {
+      const message = error instanceof Error ? error.message : "Не удалось запустить предпросмотр.";
+      setEditorLockedMessage(message);
+      setAppearanceStatus(message, true);
+      if (appearancePayloadNode) {
+        appearancePayloadNode.textContent = message;
+      }
+    });
+}

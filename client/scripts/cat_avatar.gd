@@ -91,6 +91,24 @@ const EYES_BASE_TEXTURES := {
 const NOSE_MASK_TEXTURES := {
 	"pattern12nose": preload("res://assets/characters/patterns/body/pattern12nose.png"),
 }
+const WALK_BODY_BASE_PATHS := [
+	"res://assets/characters/walk/body/base/idetbaza.png",
+	"res://assets/characters/walk/body/base/bodybaseidet.png",
+	"res://assets/characters/walk/body/base/bodybase.png",
+]
+const WALK_BODY_SHADOW_PATHS := [
+	"res://assets/characters/walk/body/shadows/idetshadow.png",
+	"res://assets/characters/walk/body/shadows/bodybaseshadowidet.png",
+	"res://assets/characters/walk/body/shadows/bodybaseshadow.png",
+]
+const WALK_BODY_CONTOUR_PATHS := [
+	"res://assets/characters/walk/body/contours/idetco.png",
+	"res://assets/characters/walk/body/contours/bodybasecoidet.png",
+	"res://assets/characters/walk/body/contours/bodybaseco.png",
+]
+const WALK_BODY_PATTERN_ROOT := "res://assets/characters/walk/patterns/body/"
+const WALK_FRAME_DURATION := 0.28
+const SPRINT_WALK_FRAME_DURATION := 0.20
 
 @export var editor_preview_only := false
 @export var editor_preview_name := "Player"
@@ -103,9 +121,13 @@ var _appearance: Dictionary = {}
 var _player_name := "Cat"
 var _is_local := false
 var _is_moving := false
+var _is_sprinting := false
+var _use_walk_pose := false
+var _walk_animation_elapsed := 0.0
 var _facing := "right"
 var _base_character_scale := Vector2.ONE
 var _base_character_offset := Vector2.ZERO
+var _optional_texture_cache: Dictionary = {}
 
 @onready var _character_root: Node2D = $CharacterRoot
 @onready var _tail_base_sprite: Sprite2D = $CharacterRoot/TailBaseSprite
@@ -131,8 +153,7 @@ func _ready() -> void:
 		queue_free()
 		return
 
-	if Engine.is_editor_hint():
-		set_process(true)
+	set_process(Engine.is_editor_hint() or _is_moving)
 
 	if _appearance.is_empty():
 		_apply_default_preview()
@@ -141,19 +162,23 @@ func _ready() -> void:
 
 	_apply_visuals()
 
-func _process(_delta: float) -> void:
-	if not Engine.is_editor_hint():
+func _process(delta: float) -> void:
+	if Engine.is_editor_hint():
+		if editor_preview_appearance_json.strip_edges().is_empty():
+			if _appearance_json != DEFAULT_APPEARANCE_JSON:
+				_apply_default_preview()
+		else:
+			var normalized = editor_preview_appearance_json.strip_edges()
+			if normalized != _appearance_json:
+				apply_appearance_json(normalized)
+
+		_apply_visuals()
 		return
 
-	if editor_preview_appearance_json.strip_edges().is_empty():
-		if _appearance_json != DEFAULT_APPEARANCE_JSON:
-			_apply_default_preview()
-	else:
-		var normalized = editor_preview_appearance_json.strip_edges()
-		if normalized != _appearance_json:
-			apply_appearance_json(normalized)
+	if not _is_moving:
+		return
 
-	_apply_visuals()
+	_advance_walk_animation(delta)
 
 func configure(player_name: String, is_local_player: bool) -> void:
 	_player_name = player_name
@@ -161,8 +186,22 @@ func configure(player_name: String, is_local_player: bool) -> void:
 	_apply_visuals()
 
 func set_moving(is_moving: bool) -> void:
+	if _is_moving == is_moving:
+		return
+
 	_is_moving = is_moving
-	_apply_visuals()
+	_walk_animation_elapsed = 0.0
+	_use_walk_pose = _is_moving
+	if is_inside_tree():
+		set_process(Engine.is_editor_hint() or _is_moving)
+		_apply_pose_layers()
+		_apply_visuals()
+
+func set_sprinting(is_sprinting: bool) -> void:
+	if _is_sprinting == is_sprinting:
+		return
+
+	_is_sprinting = is_sprinting
 
 func set_facing(facing: String) -> void:
 	var normalized = "left" if facing == "left" else "right"
@@ -240,9 +279,6 @@ func _apply_appearance_layers() -> void:
 	if _mane_contour_sprite == null or _ears_base_sprite == null or _ears_contour_sprite == null:
 		return
 
-	var body = _dictionary_or_empty(_appearance.get("body"))
-	var eyes = _dictionary_or_empty(_appearance.get("eyes"))
-	var nose = _dictionary_or_empty(_appearance.get("nose"))
 	var ears = _dictionary_or_empty(_appearance.get("ears"))
 	var tail = _dictionary_or_empty(_appearance.get("tail"))
 	var mane = _dictionary_or_empty(_appearance.get("mane"))
@@ -253,12 +289,7 @@ func _apply_appearance_layers() -> void:
 	_set_plain_sprite(_tail_shadow_sprite, _texture_from_dictionary(TAIL_SHADOW_TEXTURES, _string_or_default(tail.get("shadow_id"), "tails1shadow")))
 	_set_plain_sprite(_tail_contour_sprite, _texture_from_dictionary(TAIL_CONTOUR_TEXTURES, _string_or_default(tail.get("contour_id"), "tails1co")))
 
-	_set_tinted_sprite(_body_base_sprite, _texture_from_dictionary(BODY_BASE_TEXTURES, _string_or_default(body.get("base_id"), "bodybase")), _color_from_value(body.get("color"), DEFAULT_TINT))
-	_rebuild_pattern_layer(_body_pattern_layer, _array_or_empty(_appearance.get("body_pattern_layers")), BODY_PATTERN_TEXTURES)
-	_set_tinted_sprite(_eyes_base_sprite, _texture_from_dictionary(EYES_BASE_TEXTURES, _string_or_default(eyes.get("base_id"), "eyeswhite")), _color_from_value(eyes.get("color"), DEFAULT_TINT))
-	_set_tinted_sprite(_nose_sprite, _texture_from_dictionary(NOSE_MASK_TEXTURES, _string_or_default(nose.get("mask_id"), "pattern12nose")), _color_from_value(nose.get("color"), DEFAULT_TINT))
-	_set_plain_sprite(_body_shadow_sprite, _texture_from_dictionary(BODY_SHADOW_TEXTURES, _string_or_default(body.get("shadow_id"), "bodybaseshadow")))
-	_set_plain_sprite(_body_contour_sprite, _texture_from_dictionary(BODY_CONTOUR_TEXTURES, _string_or_default(body.get("contour_id"), "bodybaseco")))
+	_apply_pose_layers()
 	_set_plain_sprite(_cheeks_sprite, _texture_from_dictionary(CHEEKS_TEXTURES, _string_or_default(cheeks.get("id"), "")))
 
 	_set_tinted_sprite(_mane_base_sprite, _texture_from_dictionary(MANE_BASE_TEXTURES, _string_or_default(mane.get("id"), "")), _color_from_value(mane.get("color"), DEFAULT_TINT))
@@ -266,6 +297,58 @@ func _apply_appearance_layers() -> void:
 	_set_tinted_sprite(_ears_base_sprite, _texture_from_dictionary(EARS_BASE_TEXTURES, _string_or_default(ears.get("id"), "ears1")), _color_from_value(ears.get("color"), DEFAULT_TINT))
 	_set_plain_sprite(_ears_contour_sprite, _texture_from_dictionary(EARS_CONTOUR_TEXTURES, _string_or_default(ears.get("contour_id"), "ears1co")))
 	_update_character_root_fit()
+
+func _apply_pose_layers() -> void:
+	if _body_base_sprite == null or _body_pattern_layer == null or _eyes_base_sprite == null:
+		return
+	if _nose_sprite == null or _body_shadow_sprite == null or _body_contour_sprite == null:
+		return
+
+	var body = _dictionary_or_empty(_appearance.get("body"))
+	var eyes = _dictionary_or_empty(_appearance.get("eyes"))
+	var nose = _dictionary_or_empty(_appearance.get("nose"))
+
+	_set_tinted_sprite(_body_base_sprite, _resolve_body_base_texture(_string_or_default(body.get("base_id"), "bodybase")), _color_from_value(body.get("color"), DEFAULT_TINT))
+	_rebuild_body_pattern_layer(_body_pattern_layer, _array_or_empty(_appearance.get("body_pattern_layers")))
+	_set_tinted_sprite(_eyes_base_sprite, _resolve_eyes_base_texture(_string_or_default(eyes.get("base_id"), "eyeswhite")), _color_from_value(eyes.get("color"), DEFAULT_TINT))
+	_set_tinted_sprite(_nose_sprite, _resolve_nose_mask_texture(_string_or_default(nose.get("mask_id"), "pattern12nose")), _color_from_value(nose.get("color"), DEFAULT_TINT))
+	_set_plain_sprite(_body_shadow_sprite, _resolve_body_shadow_texture(_string_or_default(body.get("shadow_id"), "bodybaseshadow")))
+	_set_plain_sprite(_body_contour_sprite, _resolve_body_contour_texture(_string_or_default(body.get("contour_id"), "bodybaseco")))
+
+func _advance_walk_animation(delta: float) -> void:
+	var previous_pose = _use_walk_pose
+	_walk_animation_elapsed += maxf(delta, 0.0)
+	var frame_index = int(floor(_walk_animation_elapsed / _current_walk_frame_duration())) % 2
+	_use_walk_pose = frame_index == 0
+	if _use_walk_pose == previous_pose:
+		return
+
+	_apply_pose_layers()
+
+func _current_walk_frame_duration() -> float:
+	return SPRINT_WALK_FRAME_DURATION if _is_sprinting else WALK_FRAME_DURATION
+
+func _rebuild_body_pattern_layer(layer_root: Node2D, raw_layers: Array) -> void:
+	for child in layer_root.get_children():
+		layer_root.remove_child(child)
+		child.queue_free()
+
+	for raw_layer in raw_layers:
+		if typeof(raw_layer) != TYPE_DICTIONARY:
+			continue
+
+		var layer_data = raw_layer as Dictionary
+		var layer_id = _string_or_default(layer_data.get("id"), "")
+		var texture = _resolve_body_pattern_texture(layer_id)
+		if texture == null:
+			continue
+
+		var sprite = Sprite2D.new()
+		sprite.texture = texture
+		sprite.centered = true
+		sprite.modulate = _color_from_value(layer_data.get("color"), DEFAULT_TINT)
+		sprite.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
+		layer_root.add_child(sprite)
 
 func _rebuild_pattern_layer(layer_root: Node2D, raw_layers: Array, texture_map: Dictionary) -> void:
 	for child in layer_root.get_children():
@@ -380,6 +463,84 @@ func _transform_rect(rect: Rect2, transform: Transform2D) -> Rect2:
 	var max_y := maxf(maxf(top_left.y, top_right.y), maxf(bottom_left.y, bottom_right.y))
 
 	return Rect2(Vector2(min_x, min_y), Vector2(max_x - min_x, max_y - min_y))
+
+func _resolve_body_base_texture(texture_id: String) -> Texture2D:
+	if _use_walk_pose:
+		var texture = _load_first_existing_texture(WALK_BODY_BASE_PATHS)
+		if texture != null:
+			return texture
+	return _texture_from_dictionary(BODY_BASE_TEXTURES, texture_id)
+
+func _resolve_body_shadow_texture(texture_id: String) -> Texture2D:
+	if _use_walk_pose:
+		var texture = _load_first_existing_texture(WALK_BODY_SHADOW_PATHS)
+		if texture != null:
+			return texture
+	return _texture_from_dictionary(BODY_SHADOW_TEXTURES, texture_id)
+
+func _resolve_body_contour_texture(texture_id: String) -> Texture2D:
+	if _use_walk_pose:
+		var texture = _load_first_existing_texture(WALK_BODY_CONTOUR_PATHS)
+		if texture != null:
+			return texture
+	return _texture_from_dictionary(BODY_CONTOUR_TEXTURES, texture_id)
+
+func _resolve_body_pattern_texture(texture_id: String) -> Texture2D:
+	if _use_walk_pose:
+		var texture = _load_first_existing_texture([
+			"%s%sidet.png" % [WALK_BODY_PATTERN_ROOT, texture_id],
+			"%s%s.png" % [WALK_BODY_PATTERN_ROOT, texture_id],
+		])
+		if texture != null:
+			return texture
+	return _texture_from_dictionary(BODY_PATTERN_TEXTURES, texture_id)
+
+func _resolve_eyes_base_texture(texture_id: String) -> Texture2D:
+	if _use_walk_pose:
+		var texture = _load_first_existing_texture([
+			"%s%s.png" % [WALK_BODY_PATTERN_ROOT, texture_id],
+		])
+		if texture != null:
+			return texture
+	return _texture_from_dictionary(EYES_BASE_TEXTURES, texture_id)
+
+func _resolve_nose_mask_texture(texture_id: String) -> Texture2D:
+	if _use_walk_pose:
+		var texture = _load_first_existing_texture([
+			"%s%sidet.png" % [WALK_BODY_PATTERN_ROOT, texture_id],
+			"%s%s.png" % [WALK_BODY_PATTERN_ROOT, texture_id],
+		])
+		if texture != null:
+			return texture
+	return _texture_from_dictionary(NOSE_MASK_TEXTURES, texture_id)
+
+func _load_first_existing_texture(paths: Array) -> Texture2D:
+	for raw_path in paths:
+		var path = String(raw_path)
+		if path.is_empty():
+			continue
+
+		var texture = _load_optional_texture(path)
+		if texture != null:
+			return texture
+
+	return null
+
+func _load_optional_texture(path: String) -> Texture2D:
+	if _optional_texture_cache.has(path):
+		var cached = _optional_texture_cache[path]
+		if cached is Texture2D:
+			return cached as Texture2D
+		return null
+
+	var texture: Texture2D = null
+	if ResourceLoader.exists(path):
+		var loaded = load(path)
+		if loaded is Texture2D:
+			texture = loaded as Texture2D
+
+	_optional_texture_cache[path] = texture
+	return texture
 
 func _texture_from_dictionary(texture_map: Dictionary, texture_id: String) -> Texture2D:
 	if texture_id.is_empty() or not texture_map.has(texture_id):

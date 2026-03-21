@@ -3,8 +3,8 @@ import { CloseCode } from "@colyseus/shared-types";
 import { Player, Prey, WorldState } from "./schema/WorldState.js";
 import { isWalkableWorldPosition, resolveSpawnWorldPosition, snapWorldPosition, worldConfig } from "../config/worldConfig.js";
 import { getPlayerSpawnPoint, getPreySearchZoneById, isWorldPositionInsidePreySearchZone } from "../config/worldAuthoring.js";
-import { AuthStoreError, authStore } from "../persistence/AuthStore.js";
-import { playerIdentityStore } from "../persistence/PlayerIdentityStore.js";
+import { getPreyProfileById, isRunnerPreyProfile } from "../config/preyProfiles.js";
+import { AuthStoreError, accountsService, charactersService, } from "../services/index.js";
 const BASE_GRID_STEP_COOLDOWN_MS = 130;
 const BASE_SPRINT_GRID_STEP_COOLDOWN_MS = 90;
 const BASE_GRID_TIMING_CELL_SIZE = 64;
@@ -16,10 +16,12 @@ const STAMINA_RECOVERY_PER_SECOND = 12;
 const STAMINA_RECOVERY_DELAY_MS = 900;
 const RECONNECT_WINDOW_SECONDS = 20;
 const MAX_ACTIVE_PREY = 64;
-const PREY_MOVE_INTERVAL_MS = 220;
-const PREY_FLEE_RANGE_CELLS = 8;
-const PREY_MIN_FLEE_DISTANCE_CELLS = 6;
-const PREY_MAX_FLEE_DISTANCE_CELLS = 12;
+const PREY_BEHAVIOR_TICK_MS = 120;
+const PREY_ACTIVE_LIFETIME_MS = 90_000;
+const PREY_CAPTURED_ZONE_COOLDOWN_MS = 60_000;
+const PREY_ESCAPED_ZONE_COOLDOWN_MS = 30_000;
+const PREY_SEARCH_COOLDOWN_MESSAGE = "Здесь пока нет дичи, нужно подождать";
+const HUNTING_SKILL_ID = "hunting";
 const PREY_DIRECTIONS = Object.freeze([
     { x: -1, y: -1 },
     { x: 0, y: -1 },
@@ -36,10 +38,12 @@ export class CatRoom extends Room {
         this.maxClients = 100;
         this.autoDispose = false;
         this.sessionToPlayerId = new Map();
-        this.lastMoveAt = new Map();
+        this.nextMoveAllowedAt = new Map();
         this.lastSprintAt = new Map();
         this.lastStaminaTickAt = new Map();
-        this.searchZoneToPreyId = new Map();
+        this.sprintRequiresRepress = new Map();
+        this.playerZoneToPreyId = new Map();
+        this.playerZoneCooldownUntil = new Map();
         this.preySpawnMeta = new Map();
         this.nextPreyId = 1;
     }
@@ -49,7 +53,7 @@ export class CatRoom extends Room {
             throw new Error("Authentication required");
         }
         try {
-            return await authStore.getAuthBySessionToken(sessionToken);
+            return await accountsService.requireGameSessionContext(sessionToken);
         }
         catch (error) {
             if (error instanceof AuthStoreError) {
@@ -63,14 +67,17 @@ export class CatRoom extends Room {
         this.setSimulationInterval(() => {
             this.updatePlayerStamina();
             this.updatePreyMovement();
-        }, PREY_MOVE_INTERVAL_MS);
+        }, PREY_BEHAVIOR_TICK_MS);
         this.onMessage("ping", (client) => {
             const playerId = this.sessionToPlayerId.get(client.sessionId) ?? "";
             const player = playerId ? this.state.players.get(playerId) : null;
             if (player) {
-                const profile = playerIdentityStore.getOrCreateProfile(playerId, player.name, "account");
-                if (player.appearanceJson !== profile.appearanceJson) {
-                    player.appearanceJson = profile.appearanceJson;
+                const character = charactersService.ensureAccountCharacter(playerId, player.name);
+                if (player.appearanceJson !== character.appearanceJson) {
+                    player.appearanceJson = character.appearanceJson;
+                }
+                if (player.skillsJson !== character.skillsJson) {
+                    player.skillsJson = character.skillsJson;
                 }
             }
             client.send("pong", {
@@ -108,7 +115,7 @@ export class CatRoom extends Room {
                 return;
             }
             if (this.updatePlayerFacing(player, horizontalFacing)) {
-                playerIdentityStore.savePlayerSnapshot(toPlayerSnapshot(player));
+                charactersService.saveWorldSnapshot(toCharacterWorldSnapshot(player));
             }
         });
         this.onMessage("search-prey", (client, message) => {
@@ -120,44 +127,50 @@ export class CatRoom extends Room {
             if (!player || !player.connected) {
                 return;
             }
-            this.trySearchPrey(client, player, message);
+            this.trySearchPrey(client, playerId, player, message);
+        });
+        this.onMessage("sprint-release", (client, _message) => {
+            const playerId = this.sessionToPlayerId.get(client.sessionId);
+            if (!playerId) {
+                return;
+            }
+            this.sprintRequiresRepress.set(playerId, false);
         });
         console.log("CatRoom created");
     }
     onJoin(client, _options, auth) {
-        const authData = (client.auth ?? auth);
-        if (!authData) {
-            throw new Error("Authentication required");
-        }
+        const authData = requireGameAuthContext((client.auth ?? auth));
         const playerId = authData.characterId;
         const existingPlayer = this.state.players.get(playerId);
         if (existingPlayer) {
             throw new Error("Player is already connected or reconnecting");
         }
-        const profile = playerIdentityStore.getOrCreateProfile(playerId, authData.characterName, "account");
-        const prefersAuthoringSpawn = profile.x === 0 && profile.y === 0 && profile.createdAt === profile.updatedAt;
+        const character = charactersService.ensureAccountCharacter(playerId, authData.characterName);
+        const prefersAuthoringSpawn = character.world.x === 0 && character.world.y === 0 && character.createdAt === character.updatedAt;
         const authoringSpawnPoint = prefersAuthoringSpawn ? getPlayerSpawnPoint() : null;
         const spawnPosition = authoringSpawnPoint != null
             ? resolveSpawnWorldPosition(authoringSpawnPoint.x, authoringSpawnPoint.y)
-            : resolveSpawnWorldPosition(profile.x, profile.y);
+            : resolveSpawnWorldPosition(character.world.x, character.world.y);
         const player = new Player();
         player.playerId = authData.characterId;
         player.sessionId = client.sessionId;
         player.name = authData.characterName;
         player.x = spawnPosition.x;
         player.y = spawnPosition.y;
-        player.facing = profile.facing;
-        player.appearanceJson = profile.appearanceJson;
+        player.facing = character.world.facing;
+        player.appearanceJson = character.appearanceJson;
+        player.skillsJson = character.skillsJson;
         player.stamina = MAX_STAMINA;
         player.sprinting = false;
         player.connected = true;
         this.state.players.set(playerId, player);
         this.sessionToPlayerId.set(client.sessionId, playerId);
-        this.lastMoveAt.set(playerId, 0);
+        this.nextMoveAllowedAt.set(playerId, 0);
         this.lastSprintAt.set(playerId, 0);
         this.lastStaminaTickAt.set(playerId, Date.now());
-        void playerIdentityStore.flush();
-        void authStore.flush();
+        this.sprintRequiresRepress.set(playerId, false);
+        void charactersService.flush();
+        void accountsService.flush();
         console.log(`join ${player.name} (${playerId} / ${client.sessionId}) account=${authData.accountId}`);
     }
     async onLeave(client, code) {
@@ -168,18 +181,20 @@ export class CatRoom extends Room {
         const player = this.state.players.get(playerId);
         this.sessionToPlayerId.delete(client.sessionId);
         if (!player) {
-            this.lastMoveAt.delete(playerId);
+            this.nextMoveAllowedAt.delete(playerId);
             this.lastSprintAt.delete(playerId);
             this.lastStaminaTickAt.delete(playerId);
+            this.sprintRequiresRepress.delete(playerId);
             return;
         }
         if (code === CloseCode.CONSENTED) {
-            playerIdentityStore.savePlayerSnapshot(toPlayerSnapshot(player));
+            charactersService.saveWorldSnapshot(toCharacterWorldSnapshot(player));
             this.state.players.delete(playerId);
-            this.lastMoveAt.delete(playerId);
+            this.nextMoveAllowedAt.delete(playerId);
             this.lastSprintAt.delete(playerId);
             this.lastStaminaTickAt.delete(playerId);
-            await playerIdentityStore.flush();
+            this.sprintRequiresRepress.delete(playerId);
+            await charactersService.flush();
             console.log(`leave ${player.name} (${playerId})`);
             return;
         }
@@ -189,17 +204,19 @@ export class CatRoom extends Room {
             this.sessionToPlayerId.set(reconnectedClient.sessionId, playerId);
             player.sessionId = reconnectedClient.sessionId;
             player.connected = true;
-            this.lastMoveAt.set(playerId, 0);
+            this.nextMoveAllowedAt.set(playerId, 0);
             this.lastStaminaTickAt.set(playerId, Date.now());
+            this.sprintRequiresRepress.set(playerId, false);
             console.log(`reconnect ${player.name} (${playerId} / ${reconnectedClient.sessionId})`);
         }
         catch {
-            playerIdentityStore.savePlayerSnapshot(toPlayerSnapshot(player));
+            charactersService.saveWorldSnapshot(toCharacterWorldSnapshot(player));
             this.state.players.delete(playerId);
-            this.lastMoveAt.delete(playerId);
+            this.nextMoveAllowedAt.delete(playerId);
             this.lastSprintAt.delete(playerId);
             this.lastStaminaTickAt.delete(playerId);
-            await playerIdentityStore.flush();
+            this.sprintRequiresRepress.delete(playerId);
+            await charactersService.flush();
             console.log(`leave ${player.name} (${playerId}) after reconnect timeout`);
         }
     }
@@ -208,14 +225,15 @@ export class CatRoom extends Room {
         if (this.updatePlayerFacing(player, step.x)) {
             changed = true;
         }
-        const lastMoveAt = this.lastMoveAt.get(playerId) ?? 0;
+        const nextMoveAllowedAt = this.nextMoveAllowedAt.get(playerId) ?? 0;
         const now = Date.now();
         const gridTimingScale = Math.pow(Math.max(worldConfig.gridCellSize / BASE_GRID_TIMING_CELL_SIZE, 0.001), GRID_TIMING_SCALE_EXPONENT);
-        const canSprint = sprintRequested && player.stamina >= MIN_STAMINA_TO_SPRINT;
+        const sprintLocked = this.sprintRequiresRepress.get(playerId) === true;
+        const canSprint = !sprintLocked && sprintRequested && player.stamina >= MIN_STAMINA_TO_SPRINT;
         const gridStepCooldownMs = Math.max(1, Math.round((canSprint ? BASE_SPRINT_GRID_STEP_COOLDOWN_MS : BASE_GRID_STEP_COOLDOWN_MS) * gridTimingScale));
-        if (now - lastMoveAt < gridStepCooldownMs) {
+        if (now < nextMoveAllowedAt) {
             if (changed) {
-                playerIdentityStore.savePlayerSnapshot(toPlayerSnapshot(player));
+                charactersService.saveWorldSnapshot(toCharacterWorldSnapshot(player));
             }
             return;
         }
@@ -224,7 +242,7 @@ export class CatRoom extends Room {
         const nextY = snappedPosition.y + step.y * worldConfig.gridCellSize;
         if (!isWalkableWorldPosition(nextX, nextY)) {
             if (changed) {
-                playerIdentityStore.savePlayerSnapshot(toPlayerSnapshot(player));
+                charactersService.saveWorldSnapshot(toCharacterWorldSnapshot(player));
             }
             return;
         }
@@ -234,26 +252,31 @@ export class CatRoom extends Room {
             player.stamina = clamp(player.stamina - SPRINT_STAMINA_COST, 0, MAX_STAMINA);
             player.sprinting = true;
             this.lastSprintAt.set(playerId, now);
+            if (player.stamina < MIN_STAMINA_TO_SPRINT) {
+                this.sprintRequiresRepress.set(playerId, true);
+            }
         }
         else {
             player.sprinting = false;
         }
-        this.lastMoveAt.set(playerId, now);
+        this.nextMoveAllowedAt.set(playerId, now + gridStepCooldownMs);
         this.lastStaminaTickAt.set(playerId, now);
-        playerIdentityStore.savePlayerSnapshot(toPlayerSnapshot(player));
+        this.resolveBirdDetectionForPlayerMovement(player, now);
+        charactersService.saveWorldSnapshot(toCharacterWorldSnapshot(player));
         this.resolvePreyInteractionAt(playerId, player);
     }
     updatePlayerStamina() {
         const now = Date.now();
-        const sprintHoldMs = this.getSprintStateHoldMs();
         for (const [playerId, player] of this.state.players.entries()) {
             const lastTickAt = this.lastStaminaTickAt.get(playerId) ?? now;
             const elapsedSeconds = Math.max(0, (now - lastTickAt) / 1000);
             this.lastStaminaTickAt.set(playerId, now);
+            const nextMoveAllowedAt = this.nextMoveAllowedAt.get(playerId) ?? 0;
+            if (player.sprinting && now >= nextMoveAllowedAt) {
+                player.sprinting = false;
+            }
             const lastSprintAt = this.lastSprintAt.get(playerId) ?? 0;
-            const recentlySprinting = now - lastSprintAt <= sprintHoldMs;
-            player.sprinting = recentlySprinting;
-            if (recentlySprinting || now - lastSprintAt < STAMINA_RECOVERY_DELAY_MS) {
+            if (now - lastSprintAt < STAMINA_RECOVERY_DELAY_MS) {
                 continue;
             }
             if (player.stamina >= MAX_STAMINA) {
@@ -263,11 +286,7 @@ export class CatRoom extends Room {
             player.stamina = clamp(player.stamina + STAMINA_RECOVERY_PER_SECOND * elapsedSeconds, 0, MAX_STAMINA);
         }
     }
-    getSprintStateHoldMs() {
-        const gridTimingScale = Math.pow(Math.max(worldConfig.gridCellSize / BASE_GRID_TIMING_CELL_SIZE, 0.001), GRID_TIMING_SCALE_EXPONENT);
-        return Math.max(220, Math.round(BASE_SPRINT_GRID_STEP_COOLDOWN_MS * gridTimingScale) + 80);
-    }
-    trySearchPrey(client, player, message) {
+    trySearchPrey(client, playerId, player, message) {
         const searchZoneId = normalizeSearchZoneId(message?.searchZoneId);
         if (!searchZoneId) {
             client.send("search-prey-result", {
@@ -294,12 +313,22 @@ export class CatRoom extends Room {
             });
             return;
         }
-        const existingPreyId = this.searchZoneToPreyId.get(searchZoneId);
-        if (existingPreyId && this.state.prey.has(existingPreyId)) {
-            this.removePrey(existingPreyId);
+        const now = Date.now();
+        const unavailableUntil = this.getSearchZoneUnavailableUntil(playerId, searchZoneId, now);
+        if (unavailableUntil > now) {
+            client.send("search-prey-result", {
+                ok: false,
+                spawned: false,
+                error: PREY_SEARCH_COOLDOWN_MESSAGE,
+                searchZoneId,
+                retryAfterMs: unavailableUntil - now,
+            });
+            return;
         }
-        else if (existingPreyId) {
-            this.searchZoneToPreyId.delete(searchZoneId);
+        const playerZoneKey = buildPlayerSearchZoneKey(playerId, searchZoneId);
+        const existingPreyId = this.playerZoneToPreyId.get(playerZoneKey);
+        if (existingPreyId && !this.state.prey.has(existingPreyId)) {
+            this.playerZoneToPreyId.delete(playerZoneKey);
         }
         if (this.state.prey.size >= MAX_ACTIVE_PREY) {
             client.send("search-prey-result", {
@@ -309,17 +338,9 @@ export class CatRoom extends Room {
             });
             return;
         }
-        const successChance = getSearchSuccessChance(zone);
-        if (Math.random() > successChance) {
-            client.send("search-prey-result", {
-                ok: true,
-                spawned: false,
-                searchZoneId,
-                successChance,
-            });
-            return;
-        }
-        const spawnPosition = findPreySpawnPosition(player, zone);
+        const preyProfile = getPreyProfileForSearchZone(zone);
+        const successChance = getSearchSuccessChance(zone, preyProfile);
+        const spawnPosition = findPreySpawnPosition(player, zone, preyProfile, this.state.prey, this.getConnectedPlayers());
         if (!spawnPosition) {
             client.send("search-prey-result", {
                 ok: false,
@@ -331,17 +352,28 @@ export class CatRoom extends Room {
         const preyId = `prey_${this.nextPreyId++}`;
         const prey = new Prey();
         prey.preyId = preyId;
-        prey.kind = zone.preyKind || "mouse";
+        prey.kind = preyProfile.kind;
+        prey.visualId = (zone.preyVisualId || preyProfile.kind || "").trim();
+        prey.behaviorType = preyProfile.behaviorType;
         prey.state = "alive";
+        prey.watching = false;
         prey.searchZoneId = searchZoneId;
         prey.x = spawnPosition.x;
         prey.y = spawnPosition.y;
         this.state.prey.set(preyId, prey);
-        this.searchZoneToPreyId.set(searchZoneId, preyId);
+        this.playerZoneToPreyId.set(playerZoneKey, preyId);
         this.preySpawnMeta.set(preyId, {
+            preyProfileId: preyProfile.id,
             spawnX: spawnPosition.x,
             spawnY: spawnPosition.y,
-            maxFleeDistance: randomInteger(PREY_MIN_FLEE_DISTANCE_CELLS, PREY_MAX_FLEE_DISTANCE_CELLS) * worldConfig.gridCellSize,
+            spawnedByPlayerId: playerId,
+            maxFleeDistance: isRunnerPreyProfile(preyProfile)
+                ? randomInteger(preyProfile.minFleeDistanceCells, preyProfile.maxFleeDistanceCells) * worldConfig.gridCellSize
+                : 0,
+            expiresAt: now + PREY_ACTIVE_LIFETIME_MS,
+            nextBehaviorAt: now + getPreyBehaviorIntervalMs(preyProfile),
+            perchExpiresAt: now + getPreyPerchTimeoutMs(preyProfile),
+            phase: "safe",
         });
         client.send("search-prey-result", {
             ok: true,
@@ -355,9 +387,10 @@ export class CatRoom extends Room {
         });
     }
     updatePreyMovement() {
-        if (this.state.prey.size === 0 || this.state.players.size === 0) {
+        if (this.state.prey.size === 0) {
             return;
         }
+        const now = Date.now();
         for (const [preyId, prey] of this.state.prey.entries()) {
             if (prey.state !== "alive") {
                 continue;
@@ -366,22 +399,63 @@ export class CatRoom extends Room {
             if (!spawnMeta) {
                 continue;
             }
-            const nearestPlayer = this.findNearestConnectedPlayer(prey.x, prey.y);
-            if (!nearestPlayer) {
+            if (now >= spawnMeta.expiresAt) {
+                this.removePrey(preyId);
+                this.setSearchZoneCooldown(spawnMeta.spawnedByPlayerId, prey.searchZoneId, PREY_ESCAPED_ZONE_COOLDOWN_MS, now);
                 continue;
             }
-            const fleeRadius = PREY_FLEE_RANGE_CELLS * worldConfig.gridCellSize;
-            const currentDistance = distanceBetween(prey.x, prey.y, nearestPlayer.x, nearestPlayer.y);
-            if (currentDistance > fleeRadius) {
+            const preyProfile = getPreyProfileById(spawnMeta.preyProfileId || prey.kind);
+            if (isRunnerPreyProfile(preyProfile)) {
+                this.updateRunnerPrey(preyId, prey, preyProfile, spawnMeta, now);
                 continue;
             }
-            const nextStep = this.findBestPreyFleeStep(preyId, prey, spawnMeta, nearestPlayer.x, nearestPlayer.y);
-            if (!nextStep) {
-                continue;
+            if (preyProfile.behaviorType === "bird") {
+                this.updateBirdPrey(prey, preyProfile, spawnMeta, now);
             }
-            prey.x = nextStep.x;
-            prey.y = nextStep.y;
         }
+    }
+    updateRunnerPrey(preyId, prey, preyProfile, spawnMeta, now) {
+        if (now < spawnMeta.nextBehaviorAt) {
+            return;
+        }
+        spawnMeta.nextBehaviorAt = now + preyProfile.moveIntervalMs;
+        const nearestPlayer = this.findNearestConnectedPlayer(prey.x, prey.y);
+        if (!nearestPlayer) {
+            return;
+        }
+        const fleeRadius = preyProfile.fleeRangeCells * worldConfig.gridCellSize;
+        const currentDistance = distanceBetween(prey.x, prey.y, nearestPlayer.x, nearestPlayer.y);
+        if (currentDistance > fleeRadius) {
+            return;
+        }
+        const nextStep = this.findBestPreyFleeStep(preyId, prey, preyProfile, spawnMeta, nearestPlayer.x, nearestPlayer.y);
+        if (!nextStep) {
+            return;
+        }
+        prey.x = nextStep.x;
+        prey.y = nextStep.y;
+    }
+    updateBirdPrey(prey, preyProfile, spawnMeta, now) {
+        if (preyProfile.behaviorType !== "bird") {
+            return;
+        }
+        if (spawnMeta.perchExpiresAt > 0 && now >= spawnMeta.perchExpiresAt) {
+            const { nearbyPlayers, targetPlayer } = this.getBirdRelevantPlayers(prey, preyProfile, spawnMeta);
+            this.teleportBirdPrey("", prey, preyProfile, spawnMeta, targetPlayer, this.getConnectedPlayers(), now);
+            return;
+        }
+        if (now < spawnMeta.nextBehaviorAt) {
+            return;
+        }
+        if (spawnMeta.phase === "watching") {
+            spawnMeta.phase = "safe";
+            prey.watching = false;
+            spawnMeta.nextBehaviorAt = now + preyProfile.safeDurationMs;
+            return;
+        }
+        spawnMeta.phase = "watching";
+        prey.watching = true;
+        spawnMeta.nextBehaviorAt = now + preyProfile.watchDurationMs;
     }
     findNearestConnectedPlayer(x, y) {
         let nearestPlayer = null;
@@ -398,7 +472,73 @@ export class CatRoom extends Room {
         }
         return nearestPlayer;
     }
-    findBestPreyFleeStep(preyId, prey, spawnMeta, playerX, playerY) {
+    getConnectedPlayers() {
+        const connectedPlayers = [];
+        for (const player of this.state.players.values()) {
+            if (!player.connected) {
+                continue;
+            }
+            connectedPlayers.push(player);
+        }
+        return connectedPlayers;
+    }
+    findNearestPlayerFromList(players, x, y) {
+        let nearestPlayer = null;
+        let nearestDistance = Number.POSITIVE_INFINITY;
+        for (const player of players) {
+            const distance = distanceBetween(x, y, player.x, player.y);
+            if (distance < nearestDistance) {
+                nearestDistance = distance;
+                nearestPlayer = player;
+            }
+        }
+        return nearestPlayer;
+    }
+    findConnectedPlayersWithinRadius(x, y, radius) {
+        const players = [];
+        for (const player of this.state.players.values()) {
+            if (!player.connected) {
+                continue;
+            }
+            if (distanceBetween(x, y, player.x, player.y) > radius) {
+                continue;
+            }
+            players.push(player);
+        }
+        return players;
+    }
+    findConnectedPlayerById(playerId) {
+        if (!playerId) {
+            return null;
+        }
+        const player = this.state.players.get(playerId);
+        if (!player || !player.connected) {
+            return null;
+        }
+        return player;
+    }
+    getBirdRelevantPlayers(prey, preyProfile, spawnMeta, triggeringPlayer = null) {
+        const radius = Math.max(1, preyProfile.teleportRadiusCells) * worldConfig.gridCellSize;
+        const nearbyPlayers = this.findConnectedPlayersWithinRadius(prey.x, prey.y, radius);
+        const targetPlayer = this.getBirdTargetPlayer(prey, spawnMeta, radius, nearbyPlayers, triggeringPlayer);
+        return { nearbyPlayers, targetPlayer };
+    }
+    getBirdTargetPlayer(prey, spawnMeta, relevanceRadius, nearbyPlayers, triggeringPlayer) {
+        const preferredPlayerId = typeof spawnMeta.spawnedByPlayerId === "string" ? spawnMeta.spawnedByPlayerId.trim() : "";
+        const preferredPlayer = this.findConnectedPlayerById(preferredPlayerId);
+        if (preferredPlayer && distanceBetween(prey.x, prey.y, preferredPlayer.x, preferredPlayer.y) <= relevanceRadius) {
+            return preferredPlayer;
+        }
+        if (triggeringPlayer != null) {
+            for (const player of nearbyPlayers) {
+                if (player.playerId === triggeringPlayer.playerId) {
+                    return triggeringPlayer;
+                }
+            }
+        }
+        return this.findNearestPlayerFromList(nearbyPlayers, prey.x, prey.y);
+    }
+    findBestPreyFleeStep(preyId, prey, _preyProfile, spawnMeta, playerX, playerY) {
         let bestCandidate = null;
         let fallbackCandidate = null;
         const currentDistance = distanceBetween(prey.x, prey.y, playerX, playerY);
@@ -449,16 +589,89 @@ export class CatRoom extends Room {
         }
         return false;
     }
+    getSearchZoneUnavailableUntil(playerId, searchZoneId, now) {
+        const playerZoneKey = buildPlayerSearchZoneKey(playerId, searchZoneId);
+        let unavailableUntil = this.playerZoneCooldownUntil.get(playerZoneKey) ?? 0;
+        if (unavailableUntil <= now && this.playerZoneCooldownUntil.has(playerZoneKey)) {
+            this.playerZoneCooldownUntil.delete(playerZoneKey);
+            unavailableUntil = 0;
+        }
+        const activePreyId = this.playerZoneToPreyId.get(playerZoneKey);
+        if (!activePreyId) {
+            return unavailableUntil;
+        }
+        const activePrey = this.state.prey.get(activePreyId);
+        if (!activePrey || activePrey.state !== "alive") {
+            this.playerZoneToPreyId.delete(playerZoneKey);
+            return unavailableUntil;
+        }
+        const spawnMeta = this.preySpawnMeta.get(activePreyId);
+        if (!spawnMeta) {
+            this.playerZoneToPreyId.delete(playerZoneKey);
+            return unavailableUntil;
+        }
+        return Math.max(unavailableUntil, spawnMeta.expiresAt);
+    }
+    setSearchZoneCooldown(playerId, searchZoneId, durationMs, now) {
+        if (!playerId || !searchZoneId) {
+            return;
+        }
+        this.playerZoneCooldownUntil.set(buildPlayerSearchZoneKey(playerId, searchZoneId), now + Math.max(0, durationMs));
+    }
     removePrey(preyId) {
         const prey = this.state.prey.get(preyId);
-        if (prey) {
-            const mappedPreyId = this.searchZoneToPreyId.get(prey.searchZoneId);
+        const spawnMeta = this.preySpawnMeta.get(preyId);
+        if (prey && spawnMeta) {
+            const playerZoneKey = buildPlayerSearchZoneKey(spawnMeta.spawnedByPlayerId, prey.searchZoneId);
+            const mappedPreyId = this.playerZoneToPreyId.get(playerZoneKey);
             if (mappedPreyId === preyId) {
-                this.searchZoneToPreyId.delete(prey.searchZoneId);
+                this.playerZoneToPreyId.delete(playerZoneKey);
             }
         }
         this.state.prey.delete(preyId);
         this.preySpawnMeta.delete(preyId);
+    }
+    resolveBirdDetectionForPlayerMovement(player, now) {
+        for (const [preyId, prey] of this.state.prey.entries()) {
+            if (prey.state !== "alive" || !prey.watching) {
+                continue;
+            }
+            const spawnMeta = this.preySpawnMeta.get(preyId);
+            if (!spawnMeta) {
+                continue;
+            }
+            const preyProfile = getPreyProfileById(spawnMeta.preyProfileId || prey.kind);
+            if (preyProfile.behaviorType !== "bird") {
+                continue;
+            }
+            const { nearbyPlayers, targetPlayer } = this.getBirdRelevantPlayers(prey, preyProfile, spawnMeta, player);
+            if (!nearbyPlayers.some((candidate) => candidate.playerId === player.playerId)) {
+                continue;
+            }
+            this.teleportBirdPrey(preyId, prey, preyProfile, spawnMeta, targetPlayer, this.getConnectedPlayers(), now);
+        }
+    }
+    teleportBirdPrey(preyId, prey, preyProfile, spawnMeta, targetPlayer, connectedPlayers, now) {
+        if (preyProfile.behaviorType !== "bird") {
+            return;
+        }
+        const zone = getPreySearchZoneById(prey.searchZoneId);
+        if (!zone) {
+            prey.watching = false;
+            spawnMeta.phase = "safe";
+            spawnMeta.nextBehaviorAt = now + preyProfile.safeDurationMs;
+            spawnMeta.perchExpiresAt = now + preyProfile.perchTimeoutMs;
+            return;
+        }
+        const nextPosition = findBirdPerchPosition(zone, preyProfile, this.state.prey, preyId, targetPlayer, connectedPlayers);
+        if (nextPosition) {
+            prey.x = nextPosition.x;
+            prey.y = nextPosition.y;
+        }
+        prey.watching = false;
+        spawnMeta.phase = "safe";
+        spawnMeta.nextBehaviorAt = now + preyProfile.safeDurationMs;
+        spawnMeta.perchExpiresAt = now + preyProfile.perchTimeoutMs;
     }
     resolvePreyInteractionAt(playerId, player) {
         for (const [preyId, prey] of this.state.prey.entries()) {
@@ -467,17 +680,25 @@ export class CatRoom extends Room {
             }
             if (prey.state === "alive") {
                 prey.state = "carcass";
-                const mappedPreyId = this.searchZoneToPreyId.get(prey.searchZoneId);
-                if (mappedPreyId === preyId) {
-                    this.searchZoneToPreyId.delete(prey.searchZoneId);
+                prey.watching = false;
+                const spawnMeta = this.preySpawnMeta.get(preyId);
+                if (spawnMeta) {
+                    const playerZoneKey = buildPlayerSearchZoneKey(spawnMeta.spawnedByPlayerId, prey.searchZoneId);
+                    const mappedPreyId = this.playerZoneToPreyId.get(playerZoneKey);
+                    if (mappedPreyId === preyId) {
+                        this.playerZoneToPreyId.delete(playerZoneKey);
+                    }
+                    this.setSearchZoneCooldown(spawnMeta.spawnedByPlayerId, prey.searchZoneId, PREY_CAPTURED_ZONE_COOLDOWN_MS, Date.now());
                 }
+                const preyProfile = getPreyProfileById(spawnMeta?.preyProfileId || prey.kind);
+                const updatedCharacter = charactersService.addSkillXp(playerId, player.name, HUNTING_SKILL_ID, Math.max(0, preyProfile.xpReward));
+                player.skillsJson = updatedCharacter.skillsJson;
                 this.broadcast("prey-captured", {
                     preyId,
                     playerId,
                     kind: prey.kind,
                     x: prey.x,
                     y: prey.y,
-                    // TODO: when progression is implemented, award hunting skill progress here.
                 });
                 return;
             }
@@ -558,11 +779,33 @@ function parseHorizontalFacing(value) {
 function isSprintRequested(value) {
     return isRecord(value) && value.sprint === true;
 }
-function getSearchSuccessChance(zone) {
-    const difficultyPenalty = Math.max(0, zone.difficulty) / 100;
-    return clamp(1 - difficultyPenalty, 0.1, 1);
+function getSearchSuccessChance(zone, preyProfile) {
+    void zone;
+    void preyProfile;
+    return 1;
 }
-function findPreySpawnPosition(player, zone) {
+function getPreyProfileForSearchZone(zone) {
+    return getPreyProfileById(zone.preyProfileId || zone.preyKind);
+}
+function getPreyBehaviorIntervalMs(preyProfile) {
+    if (isRunnerPreyProfile(preyProfile)) {
+        return preyProfile.moveIntervalMs;
+    }
+    if (preyProfile.behaviorType === "bird") {
+        return preyProfile.safeDurationMs;
+    }
+    return PREY_BEHAVIOR_TICK_MS;
+}
+function getPreyPerchTimeoutMs(preyProfile) {
+    if (preyProfile.behaviorType === "bird") {
+        return preyProfile.perchTimeoutMs;
+    }
+    return 0;
+}
+function findPreySpawnPosition(player, zone, preyProfile, preyMap, connectedPlayers) {
+    if (preyProfile.behaviorType === "bird") {
+        return findBirdSpawnPosition(player, zone, preyProfile, preyMap, connectedPlayers);
+    }
     const size = worldConfig.gridCellSize;
     const left = zone.x - zone.width / 2;
     const right = zone.x + zone.width / 2;
@@ -598,6 +841,177 @@ function findPreySpawnPosition(player, zone) {
     const chosen = nearestCandidates[Math.floor(Math.random() * nearestCandidates.length)];
     return chosen ?? candidates[0];
 }
+function findBirdSpawnPosition(player, zone, preyProfile, preyMap, connectedPlayers) {
+    const size = worldConfig.gridCellSize;
+    const minRadius = Math.max(1, preyProfile.spawnMinDistanceCells) * size;
+    const maxRadius = Math.max(preyProfile.spawnMinDistanceCells, preyProfile.spawnMaxDistanceCells) * size;
+    const leashRadius = Math.max(1, preyProfile.teleportRadiusCells) * size;
+    const expandedBounds = getExpandedPreySearchZoneBounds(zone, leashRadius);
+    const minGridX = Math.ceil(expandedBounds.left / size);
+    const maxGridX = Math.floor(expandedBounds.right / size);
+    const minGridY = Math.ceil(expandedBounds.top / size);
+    const maxGridY = Math.floor(expandedBounds.bottom / size);
+    const candidates = [];
+    for (let gridY = minGridY; gridY <= maxGridY; gridY += 1) {
+        for (let gridX = minGridX; gridX <= maxGridX; gridX += 1) {
+            const x = gridX * size;
+            const y = gridY * size;
+            if (x === player.x && y === player.y) {
+                continue;
+            }
+            if (!isWalkableWorldPosition(x, y)) {
+                continue;
+            }
+            if (!isWorldPositionInsideExpandedPreySearchZone(zone, x, y, leashRadius)) {
+                continue;
+            }
+            const distance = distanceBetween(x, y, player.x, player.y);
+            if (distance < minRadius || distance > maxRadius) {
+                continue;
+            }
+            let occupied = false;
+            for (const otherPrey of preyMap.values()) {
+                if (otherPrey.state !== "alive") {
+                    continue;
+                }
+                if (otherPrey.x === x && otherPrey.y === y) {
+                    occupied = true;
+                    break;
+                }
+            }
+            if (occupied) {
+                continue;
+            }
+            let tooCloseCount = 0;
+            let nearestOtherDistance = Number.POSITIVE_INFINITY;
+            for (const otherPlayer of connectedPlayers) {
+                if (otherPlayer.playerId === player.playerId) {
+                    continue;
+                }
+                const otherDistance = distanceBetween(x, y, otherPlayer.x, otherPlayer.y);
+                nearestOtherDistance = Math.min(nearestOtherDistance, otherDistance);
+                if (otherDistance < minRadius) {
+                    tooCloseCount += 1;
+                }
+            }
+            candidates.push({
+                x,
+                y,
+                targetDistanceDelta: Math.abs(distance - ((minRadius + maxRadius) * 0.5)),
+                tooCloseCount,
+                nearestOtherDistance,
+            });
+        }
+    }
+    if (candidates.length === 0) {
+        return null;
+    }
+    candidates.sort((a, b) => {
+        if (a.tooCloseCount !== b.tooCloseCount) {
+            return a.tooCloseCount - b.tooCloseCount;
+        }
+        if (a.targetDistanceDelta !== b.targetDistanceDelta) {
+            return a.targetDistanceDelta - b.targetDistanceDelta;
+        }
+        return b.nearestOtherDistance - a.nearestOtherDistance;
+    });
+    const bestTooCloseCount = candidates[0]?.tooCloseCount ?? Number.POSITIVE_INFINITY;
+    const bestCandidates = candidates.filter((candidate) => candidate.tooCloseCount === bestTooCloseCount);
+    const chosen = bestCandidates[Math.floor(Math.random() * bestCandidates.length)];
+    return chosen ?? candidates[0];
+}
+function findBirdPerchPosition(zone, preyProfile, preyMap, ignoredPreyId, targetPlayer, connectedPlayers) {
+    const size = worldConfig.gridCellSize;
+    const leashRadius = Math.max(1, preyProfile.teleportRadiusCells) * size;
+    const expandedBounds = getExpandedPreySearchZoneBounds(zone, leashRadius);
+    const minGridX = Math.ceil(expandedBounds.left / size);
+    const maxGridX = Math.floor(expandedBounds.right / size);
+    const minGridY = Math.ceil(expandedBounds.top / size);
+    const maxGridY = Math.floor(expandedBounds.bottom / size);
+    const idealMinDistance = Math.max(1, preyProfile.spawnMinDistanceCells) * size;
+    const idealMaxDistance = Math.max(preyProfile.spawnMinDistanceCells, preyProfile.spawnMaxDistanceCells) * size;
+    const candidates = [];
+    for (let gridY = minGridY; gridY <= maxGridY; gridY += 1) {
+        for (let gridX = minGridX; gridX <= maxGridX; gridX += 1) {
+            const x = gridX * size;
+            const y = gridY * size;
+            if (!isWalkableWorldPosition(x, y)) {
+                continue;
+            }
+            if (!isWorldPositionInsideExpandedPreySearchZone(zone, x, y, leashRadius)) {
+                continue;
+            }
+            let occupied = false;
+            for (const [otherPreyId, otherPrey] of preyMap.entries()) {
+                if (otherPreyId === ignoredPreyId) {
+                    continue;
+                }
+                if (otherPrey.state !== "alive") {
+                    continue;
+                }
+                if (otherPrey.x === x && otherPrey.y === y) {
+                    occupied = true;
+                    break;
+                }
+            }
+            if (occupied) {
+                continue;
+            }
+            const targetDistance = targetPlayer ? distanceBetween(x, y, targetPlayer.x, targetPlayer.y) : Number.POSITIVE_INFINITY;
+            if (targetPlayer != null && (targetDistance < idealMinDistance || targetDistance > idealMaxDistance)) {
+                continue;
+            }
+            let tooCloseCount = 0;
+            let nearestOtherDistance = Number.POSITIVE_INFINITY;
+            for (const connectedPlayer of connectedPlayers) {
+                if (targetPlayer != null && connectedPlayer.playerId === targetPlayer.playerId) {
+                    continue;
+                }
+                const otherDistance = distanceBetween(x, y, connectedPlayer.x, connectedPlayer.y);
+                nearestOtherDistance = Math.min(nearestOtherDistance, otherDistance);
+                if (otherDistance < idealMinDistance) {
+                    tooCloseCount += 1;
+                }
+            }
+            candidates.push({
+                x,
+                y,
+                targetDistanceDelta: targetPlayer == null ? 0 : Math.abs(targetDistance - ((idealMinDistance + idealMaxDistance) * 0.5)),
+                tooCloseCount,
+                nearestOtherDistance,
+            });
+        }
+    }
+    if (candidates.length === 0) {
+        return null;
+    }
+    candidates.sort(compareBirdPerchCandidates);
+    return candidates[0] ?? null;
+}
+function compareBirdPerchCandidates(left, right) {
+    if (left.tooCloseCount !== right.tooCloseCount) {
+        return left.tooCloseCount - right.tooCloseCount;
+    }
+    if (left.targetDistanceDelta !== right.targetDistanceDelta) {
+        return left.targetDistanceDelta - right.targetDistanceDelta;
+    }
+    return right.nearestOtherDistance - left.nearestOtherDistance;
+}
+function buildPlayerSearchZoneKey(playerId, searchZoneId) {
+    return `${playerId.trim()}::${searchZoneId.trim()}`;
+}
+function getExpandedPreySearchZoneBounds(zone, margin) {
+    return {
+        left: zone.x - zone.width / 2 - margin,
+        right: zone.x + zone.width / 2 + margin,
+        top: zone.y - zone.height / 2 - margin,
+        bottom: zone.y + zone.height / 2 + margin,
+    };
+}
+function isWorldPositionInsideExpandedPreySearchZone(zone, x, y, margin) {
+    const bounds = getExpandedPreySearchZoneBounds(zone, margin);
+    return x >= bounds.left && x <= bounds.right && y >= bounds.top && y <= bounds.bottom;
+}
 function clamp(value, min, max) {
     return Math.max(min, Math.min(max, value));
 }
@@ -607,13 +1021,23 @@ function distanceBetween(ax, ay, bx, by) {
 function randomInteger(min, max) {
     return Math.floor(Math.random() * (max - min + 1)) + min;
 }
-function toPlayerSnapshot(player) {
+function toCharacterWorldSnapshot(player) {
     return {
-        playerId: player.playerId,
+        characterId: player.playerId,
         name: player.name,
         x: player.x,
         y: player.y,
         facing: player.facing === "left" ? "left" : "right",
+    };
+}
+function requireGameAuthContext(auth) {
+    if (!auth || !auth.characterId || !auth.characterName) {
+        throw new Error("Authentication required");
+    }
+    return {
+        ...auth,
+        characterId: auth.characterId,
+        characterName: auth.characterName,
     };
 }
 //# sourceMappingURL=CatRoom.js.map

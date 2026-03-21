@@ -1,3 +1,28 @@
 {
-	"zones": []
+	"zones": [
+		{
+			"displayName": "Location",
+			"height": 5120.0,
+			"isNeutral": true,
+			"locationId": "location_01",
+			"name": "WorldLocationZone2",
+			"preyTableId": "default",
+			"tribeId": "",
+			"width": 11000.0,
+			"x": -10621.0,
+			"y": -513.0
+		},
+		{
+			"displayName": "Location",
+			"height": 5120.0,
+			"isNeutral": true,
+			"locationId": "location_01",
+			"name": "WorldLocationZone3",
+			"preyTableId": "default",
+			"tribeId": "",
+			"width": 21000.0,
+			"x": 5379.0,
+			"y": -513.0
+		}
+	]
 }

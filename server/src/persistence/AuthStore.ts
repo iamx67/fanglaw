@@ -2,6 +2,7 @@ import { randomBytes, randomUUID, scryptSync, timingSafeEqual } from "node:crypt
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { ensureConfiguredDatabaseMigrations } from "../migrations/bootstrap.js";
 
 export type AuthAccount = {
   accountId: string;
@@ -10,7 +11,7 @@ export type AuthAccount = {
   passwordSalt: string;
   createdAt: number;
   updatedAt: number;
-  activeCharacterId: string;
+  activeCharacterId: string | null;
 };
 
 export type AuthCharacter = {
@@ -24,23 +25,22 @@ export type AuthCharacter = {
 export type AuthSession = {
   token: string;
   accountId: string;
-  characterId: string;
+  characterId: string | null;
   createdAt: number;
   updatedAt: number;
 };
 
 export type AuthContextData = {
   accountId: string;
-  characterId: string;
+  characterId: string | null;
   email: string;
-  characterName: string;
+  characterName: string | null;
   sessionToken: string;
 };
 
 export type AuthRegistrationInput = {
   email: string;
   password: string;
-  characterName: string;
 };
 
 export type AuthLoginInput = {
@@ -48,9 +48,14 @@ export type AuthLoginInput = {
   password: string;
 };
 
+export type AuthCreateCharacterInput = {
+  sessionToken: string;
+  characterName: string;
+};
+
 export type AuthMutationResult = {
   account: AuthAccount;
-  character: AuthCharacter;
+  character: AuthCharacter | null;
   session: AuthSession;
 };
 
@@ -58,6 +63,7 @@ export interface AuthStoreBackend {
   load(): Promise<void>;
   register(input: AuthRegistrationInput): Promise<AuthMutationResult>;
   login(input: AuthLoginInput): Promise<AuthMutationResult>;
+  createCharacter(input: AuthCreateCharacterInput): Promise<AuthMutationResult>;
   getAuthBySessionToken(sessionToken: string): Promise<AuthContextData>;
   flush(): Promise<void>;
 }
@@ -82,7 +88,9 @@ export class AuthStoreError extends Error {
       | "INVALID_PASSWORD"
       | "INVALID_NAME"
       | "AUTH_FAILED"
-      | "SESSION_NOT_FOUND",
+      | "SESSION_NOT_FOUND"
+      | "CHARACTER_EXISTS"
+      | "CHARACTER_REQUIRED",
   ) {
     super(message);
   }
@@ -122,7 +130,7 @@ class FileAuthStore implements AuthStoreBackend {
             passwordSalt: typeof account.passwordSalt === "string" ? account.passwordSalt : "",
             createdAt: normalizeTimestamp(account.createdAt),
             updatedAt: normalizeTimestamp(account.updatedAt),
-            activeCharacterId: typeof account.activeCharacterId === "string" ? account.activeCharacterId : "",
+            activeCharacterId: normalizeOptionalCharacterId(account.activeCharacterId),
           });
         }
       }
@@ -154,7 +162,7 @@ class FileAuthStore implements AuthStoreBackend {
           this.sessions.set(token, {
             token,
             accountId: typeof session.accountId === "string" ? session.accountId : "",
-            characterId: typeof session.characterId === "string" ? session.characterId : "",
+            characterId: normalizeOptionalCharacterId(session.characterId),
             createdAt: normalizeTimestamp(session.createdAt),
             updatedAt: normalizeTimestamp(session.updatedAt),
           });
@@ -172,19 +180,13 @@ class FileAuthStore implements AuthStoreBackend {
   async register(input: AuthRegistrationInput) {
     const email = assertEmail(input.email);
     const password = assertPassword(input.password);
-    const characterName = assertCharacterName(input.characterName);
 
     if (this.findAccountByEmail(email)) {
       throw new AuthStoreError("Email is already registered", "EMAIL_TAKEN");
     }
 
-    if (this.findCharacterByName(characterName)) {
-      throw new AuthStoreError("Character name is already taken", "NAME_TAKEN");
-    }
-
     const now = Date.now();
     const accountId = randomUUID();
-    const characterId = randomUUID();
     const passwordSalt = randomBytes(16).toString("hex");
     const passwordHash = hashPassword(password, passwordSalt);
 
@@ -195,25 +197,16 @@ class FileAuthStore implements AuthStoreBackend {
       passwordSalt,
       createdAt: now,
       updatedAt: now,
-      activeCharacterId: characterId,
-    };
-
-    const character: AuthCharacter = {
-      characterId,
-      accountId,
-      name: characterName,
-      createdAt: now,
-      updatedAt: now,
+      activeCharacterId: null,
     };
 
     this.accounts.set(accountId, account);
-    this.characters.set(characterId, character);
     this.markDirty();
 
-    const session = this.createSession(accountId, characterId);
+    const session = this.createSession(accountId, null);
     return {
       account,
-      character,
+      character: null,
       session,
     };
   }
@@ -227,12 +220,55 @@ class FileAuthStore implements AuthStoreBackend {
       throw new AuthStoreError("Invalid email or password", "AUTH_FAILED");
     }
 
-    const character = this.characters.get(account.activeCharacterId);
-    if (!character) {
-      throw new AuthStoreError("Character is missing for this account", "AUTH_FAILED");
+    const character = this.resolveActiveCharacter(account);
+    const session = this.createSession(account.accountId, character?.characterId ?? null);
+    return {
+      account,
+      character,
+      session,
+    };
+  }
+
+  async createCharacter(input: AuthCreateCharacterInput) {
+    const normalizedToken = normalizeSessionToken(input.sessionToken);
+    const characterName = assertCharacterName(input.characterName);
+    const session = this.sessions.get(normalizedToken);
+
+    if (!session) {
+      throw new AuthStoreError("Session token is invalid", "SESSION_NOT_FOUND");
     }
 
-    const session = this.createSession(account.accountId, character.characterId);
+    const account = this.accounts.get(session.accountId);
+    if (!account) {
+      throw new AuthStoreError("Session token is invalid", "SESSION_NOT_FOUND");
+    }
+
+    const existingCharacter = this.resolveActiveCharacter(account);
+    if (existingCharacter) {
+      throw new AuthStoreError("Character is already created for this account", "CHARACTER_EXISTS");
+    }
+
+    if (this.findCharacterByName(characterName)) {
+      throw new AuthStoreError("Character name is already taken", "NAME_TAKEN");
+    }
+
+    const now = Date.now();
+    const character: AuthCharacter = {
+      characterId: randomUUID(),
+      accountId: account.accountId,
+      name: characterName,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    account.activeCharacterId = character.characterId;
+    account.updatedAt = now;
+    session.characterId = character.characterId;
+    session.updatedAt = now;
+
+    this.characters.set(character.characterId, character);
+    this.markDirty();
+
     return {
       account,
       character,
@@ -249,9 +285,10 @@ class FileAuthStore implements AuthStoreBackend {
     }
 
     const account = this.accounts.get(session.accountId);
-    const character = this.characters.get(session.characterId);
+    const resolvedCharacterId = session.characterId || account?.activeCharacterId || null;
+    const character = resolvedCharacterId ? this.characters.get(resolvedCharacterId) ?? null : null;
 
-    if (!account || !character) {
+    if (!account) {
       throw new AuthStoreError("Session token is invalid", "SESSION_NOT_FOUND");
     }
 
@@ -260,9 +297,9 @@ class FileAuthStore implements AuthStoreBackend {
 
     return {
       accountId: account.accountId,
-      characterId: character.characterId,
+      characterId: character?.characterId ?? null,
       email: account.email,
-      characterName: character.name,
+      characterName: character?.name ?? null,
       sessionToken: session.token,
     };
   }
@@ -286,7 +323,7 @@ class FileAuthStore implements AuthStoreBackend {
     return this.writeQueue;
   }
 
-  private createSession(accountId: string, characterId: string) {
+  private createSession(accountId: string, characterId: string | null) {
     const token = randomBytes(32).toString("hex");
     const now = Date.now();
     const session: AuthSession = {
@@ -300,6 +337,15 @@ class FileAuthStore implements AuthStoreBackend {
     this.sessions.set(token, session);
     this.markDirty();
     return session;
+  }
+
+  private resolveActiveCharacter(account: AuthAccount) {
+    const activeCharacterId = account.activeCharacterId;
+    if (!activeCharacterId) {
+      return null;
+    }
+
+    return this.characters.get(activeCharacterId) ?? null;
   }
 
   private findAccountByEmail(email: string) {
@@ -356,6 +402,7 @@ class RuntimeAuthStore implements AuthStoreBackend {
 
     if (this.databaseUrl) {
       try {
+        await ensureConfiguredDatabaseMigrations(this.databaseUrl, this.databaseSsl);
         const { PostgresAuthStore } = await import("./PostgresAuthStore.js");
         this.backend = new PostgresAuthStore({
           databaseUrl: this.databaseUrl,
@@ -395,6 +442,10 @@ class RuntimeAuthStore implements AuthStoreBackend {
     return await this.requireBackend().login(input);
   }
 
+  async createCharacter(input: AuthCreateCharacterInput) {
+    return await this.requireBackend().createCharacter(input);
+  }
+
   async getAuthBySessionToken(sessionToken: string) {
     return await this.requireBackend().getAuthBySessionToken(sessionToken);
   }
@@ -425,6 +476,7 @@ function serializeAuthFile(
     serializedAccounts[accountId] = {
       ...account,
       email: normalizeEmail(account.email),
+      activeCharacterId: normalizeOptionalCharacterId(account.activeCharacterId),
       createdAt: normalizeTimestamp(account.createdAt),
       updatedAt: normalizeTimestamp(account.updatedAt),
     };
@@ -442,6 +494,7 @@ function serializeAuthFile(
   for (const [token, session] of sessions.entries()) {
     serializedSessions[token] = {
       ...session,
+      characterId: normalizeOptionalCharacterId(session.characterId),
       createdAt: normalizeTimestamp(session.createdAt),
       updatedAt: normalizeTimestamp(session.updatedAt),
     };
@@ -501,6 +554,15 @@ export function normalizeSessionToken(value: unknown) {
   }
 
   return value.trim().toLowerCase();
+}
+
+export function normalizeOptionalCharacterId(value: unknown) {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const normalized = value.trim();
+  return normalized ? normalized : null;
 }
 
 export function normalizeTimestamp(value: unknown) {
